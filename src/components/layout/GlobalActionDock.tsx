@@ -34,12 +34,12 @@ export default function GlobalActionDock() {
   const actions = role === 'citizen' ? citizenActions : role === 'responder' ? responderActions : opsActions;
 
   return (
-    <div className="absolute bottom-8 left-1/2 -translate-x-1/2 bg-surface-0 px-2 py-2 flex items-center gap-2 z-10 border border-border-strong rounded-none shadow-[8px_8px_0px_rgba(26,26,26,1)]">
+    <div className="absolute bottom-4 md:bottom-8 left-1/2 -translate-x-1/2 bg-surface-0 px-2 py-2 flex items-center justify-center gap-2 z-10 border border-border-strong md:rounded-none shadow-[4px_4px_0px_rgba(26,26,26,1)] md:shadow-[8px_8px_0px_rgba(26,26,26,1)] flex-wrap w-[90%] md:w-auto max-w-full">
       {actions.map((action) => (
         <button
           key={action.label}
           onClick={action.action}
-          className={`flex items-center gap-2 px-6 py-3 text-[10px] uppercase tracking-widest font-bold rounded-none transition-all border border-border-strong hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-[0px_0px_0px_rgba(26,26,26,1)] shadow-[4px_4px_0px_rgba(26,26,26,1)] ${
+          className={`flex items-center justify-center gap-2 px-3 py-2 md:px-6 md:py-3 text-[9px] md:text-[10px] uppercase tracking-widest font-bold rounded-none transition-all border border-border-strong hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-[0px_0px_0px_rgba(26,26,26,1)] shadow-[2px_2px_0px_rgba(26,26,26,1)] md:shadow-[4px_4px_0px_rgba(26,26,26,1)] flex-1 min-w-[120px] md:min-w-0 ${
             action.primary
               ? 'bg-surface-3 text-text-inverse hover:brightness-110'
               : 'bg-surface-0 text-text-primary hover:bg-surface-2'

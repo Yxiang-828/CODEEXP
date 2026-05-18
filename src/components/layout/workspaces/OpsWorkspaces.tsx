@@ -14,7 +14,7 @@ export function DeclareIncident() {
       <div className="flex-1 overflow-y-auto pr-2 pb-4 flex flex-col gap-8">
          <div className="border-l-4 border-accent-critical pl-4">
             <label className="text-[10px] font-black uppercase tracking-widest block mb-3">Severity & Type</label>
-            <div className="flex gap-2">
+            <div className="flex flex-col sm:flex-row gap-2">
                <select className="flex-1 border border-border-strong p-3 text-xs font-bold bg-surface-1 appearance-none cursor-pointer focus:border-text-primary outline-none text-text-primary rounded-none shadow-[2px_2px_0px_rgba(26,26,26,1)]">
                   <option>Critical</option>
                   <option>Warning</option>
@@ -27,8 +27,7 @@ export function DeclareIncident() {
                </select>
             </div>
          </div>
-         
-         <div className="border-l-4 border-accent-info pl-4">
+                  <div className="border-l-4 border-accent-info pl-4">
             <label className="text-[10px] font-black uppercase tracking-widest block mb-3">Visibility Scope</label>
             <div className="flex flex-col gap-3">
                <label className="flex items-center gap-3 cursor-pointer border border-border-strong p-4 bg-surface-2 hover:bg-surface-1 transition-colors shadow-[2px_2px_0px_rgba(26,26,26,1)] relative group">
@@ -37,6 +36,13 @@ export function DeclareIncident() {
                   </div>
                   <span className="text-xs font-bold uppercase tracking-widest text-text-primary">Public (All Citizens)</span>
                </label>
+               <div className="ml-8 border-l border-border-strong pl-4 flex flex-col gap-2 -mt-1 mb-1">
+                  <span className="text-[9px] uppercase tracking-widest text-text-secondary font-bold">Preview As:</span>
+                  <div className="flex gap-2">
+                    <button className="bg-surface-0 border border-border-strong text-text-primary text-[9px] font-bold uppercase tracking-widest px-3 py-1 cursor-pointer hover:bg-surface-2">Citizen App</button>
+                    <button className="bg-surface-0 border border-border-strong text-text-secondary opacity-60 text-[9px] font-bold uppercase tracking-widest px-3 py-1 cursor-pointer hover:opacity-100 hover:text-text-primary border-dashed">Media Portal</button>
+                  </div>
+               </div>
                <label className="flex items-center gap-3 cursor-pointer border border-border-strong p-4 bg-surface-2 opacity-60 hover:opacity-100 transition-opacity">
                   <div className="w-4 h-4 border border-border-strong bg-surface-0 rounded-none"></div>
                   <span className="text-xs font-bold uppercase tracking-widest text-text-primary">Role-Gated (Responders Only)</span>

@@ -125,7 +125,7 @@ export function ReportCompose() {
 }
 
 export function NeedHelpSOS() {
-  const { setShellState } = useAppContext();
+  const { setShellState, setTrackingState } = useAppContext();
   return (
     <div className="flex flex-col h-full animate-in fade-in border-t-[12px] border-accent-critical bg-surface-0">
       <div className="p-6 flex flex-col items-center justify-center text-center gap-6 h-full pb-12">
@@ -137,7 +137,7 @@ export function NeedHelpSOS() {
            <p className="text-[10px] font-bold uppercase tracking-widest text-text-secondary">Your location will be securely shared with nearby responders.</p>
          </div>
          <div className="w-full mt-auto flex flex-col gap-6">
-            <button onClick={() => setShellState('S9')} className="w-full bg-accent-critical text-surface-0 py-5 text-sm font-black uppercase tracking-[0.2em] shadow-[4px_4px_0px_rgba(26,26,26,1)] border-2 border-border-strong hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none transition-all cursor-pointer">
+            <button onClick={() => { setShellState('S9'); setTrackingState('sos'); }} className="w-full bg-accent-critical text-surface-0 py-5 text-sm font-black uppercase tracking-[0.2em] shadow-[4px_4px_0px_rgba(26,26,26,1)] border-2 border-border-strong hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none transition-all cursor-pointer">
                ACTIVATE NOW<br/><span className="text-[9px] opacity-80">(Hold 3s)</span>
             </button>
             <div className="grid grid-cols-2 gap-3 mt-2 pt-6 border-t border-border-strong">

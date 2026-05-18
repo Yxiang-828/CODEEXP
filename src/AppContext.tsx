@@ -1,7 +1,8 @@
 import React, { createContext, useContext, useState } from 'react';
 
 export type Role = 'citizen' | 'responder' | 'ops';
-export type ShellState = 'S0' | 'S2' | 'S4' | 'S6';
+export type ShellState = 'S0' | 'S2' | 'S4' | 'S6' | 'S9';
+export type TrackingState = 'none' | 'sos' | 'assigned';
 
 interface AppState {
   role: Role;
@@ -10,6 +11,8 @@ interface AppState {
   setDrawerContent: (content: string | null) => void;
   shellState: ShellState;
   setShellState: (state: ShellState) => void;
+  trackingState: TrackingState;
+  setTrackingState: (state: TrackingState) => void;
 }
 
 const AppContext = createContext<AppState | undefined>(undefined);
@@ -18,6 +21,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [role, setRole] = useState<Role>('citizen');
   const [drawerContent, setDrawerContent] = useState<string | null>(null);
   const [shellState, setShellState] = useState<ShellState>('S0');
+  const [trackingState, setTrackingState] = useState<TrackingState>('assigned');
 
   // Handle drawer opening syncing with shell state
   const handleSetDrawerContent = (content: string | null) => {
@@ -30,7 +34,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   return (
-    <AppContext.Provider value={{ role, setRole, drawerContent, setDrawerContent: handleSetDrawerContent, shellState, setShellState }}>
+    <AppContext.Provider value={{ role, setRole, drawerContent, setDrawerContent: handleSetDrawerContent, shellState, setShellState, trackingState, setTrackingState }}>
       {children}
     </AppContext.Provider>
   );

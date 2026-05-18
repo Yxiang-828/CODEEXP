@@ -1,5 +1,5 @@
 import React from 'react';
-import { Search, MapPin, Clock, ShieldAlert, CheckCircle, Navigation } from 'lucide-react';
+import { Search, MapPin, Clock, ShieldAlert, CheckCircle, Navigation, PenTool } from 'lucide-react';
 import { useAppContext } from '../../../AppContext';
 
 export function DutyStatus() {
@@ -196,11 +196,27 @@ export function CaseLobby() {
   return (
     <div className="flex flex-col h-full bg-surface-0">
       <div className="p-6 border-b border-border-strong bg-accent-critical text-surface-0 shadow-[0_4px_0px_rgba(26,26,26,1)] z-10 flex flex-col gap-2">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between shadow-none">
             <h2 className="text-2xl font-serif font-black italic tracking-tighter">ALPHA-09</h2>
-            <div className="border border-surface-0 px-2 py-1 text-[9px] font-black uppercase tracking-widest bg-surface-0/20">Active Operation</div>
+            <div className="border border-border-strong px-2 py-1 text-[9px] font-black uppercase tracking-widest bg-surface-0 text-accent-critical flex gap-2 items-center">
+              <span className="w-2 h-2 bg-accent-critical border border-border-strong rotate-45"></span>
+              L5 EMERGENCY
+            </div>
         </div>
         <p className="text-[10px] font-bold uppercase tracking-widest mt-2 border border-surface-0 inline-block px-2 py-1 self-start shadow-[2px_2px_0px_rgba(26,26,26,1)]">Multi-Vehicle Collision</p>
+      </div>
+      
+      <div className="bg-surface-0 border-b border-border-strong p-3 flex gap-2">
+         {/* Status Pipeline for the responder's assignment */}
+         <div className="flex-1 border bg-accent-success text-surface-0 border-border-strong text-center py-1.5 text-[9px] font-black uppercase tracking-widest cursor-pointer group shadow-[2px_2px_0px_rgba(26,26,26,1)]">
+            1. Assigned
+         </div>
+         <div className="flex-1 border bg-surface-1 text-text-primary opacity-60 border-border-strong text-center py-1.5 text-[9px] font-black uppercase tracking-widest cursor-pointer group hover:bg-surface-2 transition-colors">
+            2. En Route
+         </div>
+         <div className="flex-1 border bg-surface-1 text-text-primary opacity-60 border-border-strong text-center py-1.5 text-[9px] font-black uppercase tracking-widest cursor-pointer group hover:bg-surface-2 transition-colors">
+            3. On Scene
+         </div>
       </div>
       
       <div className="flex-1 overflow-y-auto p-6 flex flex-col gap-6 relative bg-surface-2 shadow-[inset_4px_4px_0px_rgba(26,26,26,0.05)]">
@@ -231,8 +247,11 @@ export function CaseLobby() {
          </div>
       </div>
       
-      <div className="p-6 border-t border-border-strong bg-surface-1">
-         <button onClick={() => setDrawerContent('operation_chat')} className="w-full bg-surface-3 text-text-inverse py-4 border border-border-strong text-[10px] uppercase font-black tracking-widest shadow-[4px_4px_0px_rgba(26,26,26,1)] hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none transition-all cursor-pointer">Join Operation Comms</button>
+      <div className="p-6 border-t border-border-strong bg-surface-1 flex gap-2">
+         <button className="flex-1 bg-surface-0 text-text-primary py-4 border border-border-strong text-[10px] uppercase font-black tracking-widest shadow-[4px_4px_0px_rgba(26,26,26,1)] hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none transition-all cursor-pointer flex justify-center items-center gap-2">
+           <PenTool className="w-4 h-4"/> Whiteboard Overlay
+         </button>
+         <button onClick={() => setDrawerContent('operation_chat')} className="flex-[2] bg-surface-3 text-text-inverse py-4 border border-border-strong text-[10px] uppercase font-black tracking-widest shadow-[4px_4px_0px_rgba(26,26,26,1)] hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none transition-all cursor-pointer">Join Operation Comms</button>
       </div>
     </div>
   )
@@ -245,7 +264,7 @@ export function OperationChatRoom() {
       <div className="px-6 py-4 border-b border-border-strong bg-surface-1 flex items-center justify-between z-10 shadow-[0_2px_0px_rgba(26,26,26,1)]">
         <div className="flex flex-col gap-1">
            <h2 className="text-sm font-black uppercase tracking-widest flex items-center gap-2">
-             <div className="w-2 h-2 bg-accent-success border border-border-strong animate-pulse"></div> COMMS : ALPHA-09
+             <div className="w-2 h-2 bg-accent-success border border-border-strong animate-[pulse_2s_ease-in-out_infinite]"></div> COMMS : ALPHA-09
            </h2>
            <span className="text-[9px] font-bold uppercase tracking-widest text-accent-info bg-surface-0 border border-border-strong shadow-[2px_2px_0px_rgba(26,26,26,1)] px-2 py-0.5">Support AI Agent in Room</span>
         </div>
@@ -270,8 +289,13 @@ export function OperationChatRoom() {
       </div>
       
       <div className="p-4 border-t border-border-strong bg-surface-1">
-         <div className="flex gap-2">
-            <input type="text" placeholder="TRANSMIT MESSAGE..." className="flex-1 bg-surface-0 border border-border-strong p-3 text-[10px] font-bold uppercase tracking-widest shadow-[inset_2px_2px_0px_rgba(26,26,26,0.1)] outline-none focus:border-text-primary transition-all" />
+         <div className="text-[9px] font-bold uppercase tracking-widest text-text-secondary w-full bg-surface-2 border border-border-strong border-b-0 px-3 py-1.5 flex gap-3">
+           <span className="cursor-pointer hover:text-text-primary">/assign</span>
+           <span className="cursor-pointer hover:text-text-primary">/request_med</span>
+           <span className="cursor-pointer hover:text-text-primary opacity-50">/summary</span>
+         </div>
+         <div className="flex gap-2 relative">
+            <input type="text" placeholder="/... OR TRANSMIT MESSAGE" className="flex-1 bg-surface-0 border border-border-strong p-3 text-[10px] font-bold uppercase tracking-widest shadow-[inset_2px_2px_0px_rgba(26,26,26,0.1)] outline-none focus:border-text-primary transition-all" />
             <button className="bg-surface-3 text-text-inverse px-6 border border-border-strong shadow-[4px_4px_0px_rgba(26,26,26,1)] text-[10px] font-black uppercase cursor-pointer hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none transition-all">Send</button>
          </div>
       </div>

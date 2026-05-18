@@ -24,7 +24,7 @@ export default function LeftRail() {
   const links = role === 'responder' ? responderLinks : opsLinks;
 
   return (
-    <aside className="w-[64px] xl:w-[280px] bg-surface-0 z-10 flex flex-col p-4 gap-6 border-r border-border-strong transition-all">
+    <aside className="hidden md:flex w-[64px] xl:w-[280px] bg-surface-0 z-10 flex-col p-4 gap-6 border-r border-border-strong transition-all">
       <div className="hidden xl:flex items-center gap-2">
          <span className="w-2 h-2 bg-accent-critical rounded-none border border-border-strong"></span>
          <h2 className="text-[10px] font-black uppercase tracking-widest text-text-primary">Live Operations</h2>
@@ -51,6 +51,24 @@ export default function LeftRail() {
           </button>
         ))}
       </nav>
+
+      {role === 'responder' && (
+        <div className="mt-8 flex flex-col gap-2">
+           <div className="hidden xl:flex items-center gap-2 mb-2 p-1">
+             <h2 className="text-[10px] font-black uppercase tracking-widest text-text-secondary border-b border-border-strong border-dashed w-full pb-1">Radio Rooms</h2>
+           </div>
+           
+           <button onClick={() => setDrawerContent('operation_chat')} className="flex items-center gap-3 p-2 border border-border-strong hover:bg-surface-2 transition-colors group relative bg-surface-1 cursor-pointer">
+              <div className="w-2 h-2 bg-accent-critical border border-border-strong flex-shrink-0 animate-[pulse_2s_ease-in-out_infinite]"></div>
+              <span className="hidden xl:block font-bold uppercase tracking-widest text-[10px] flex-1 text-left text-text-primary">ALPHA-09</span>
+              <span className="hidden xl:block text-[9px] text-text-secondary font-mono bg-surface-0 px-1 border border-border-strong">@ME</span>
+           </button>
+           <button className="flex items-center gap-3 p-2 border border-border-strong hover:bg-surface-2 transition-colors group relative bg-surface-0 opacity-70 hover:opacity-100 cursor-pointer">
+              <div className="w-2 h-2 bg-accent-warning border border-border-strong flex-shrink-0"></div>
+              <span className="hidden xl:block font-bold uppercase tracking-widest text-[10px] flex-1 text-left text-text-primary">BETA-12</span>
+           </button>
+        </div>
+      )}
     </aside>
   );
 }
