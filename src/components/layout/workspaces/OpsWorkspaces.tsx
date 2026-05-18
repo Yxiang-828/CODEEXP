@@ -1,188 +1,516 @@
-import React from 'react';
-import { Search, MapPin, Clock, RadioTower, Users, ShieldAlert, Activity, FileText } from 'lucide-react';
+import { useState } from 'react';
+import { Megaphone, Eye, AlertOctagon, CheckCircle2 } from 'lucide-react';
 import { useAppContext } from '../../../AppContext';
+import SeverityChip from '../../primitives/SeverityChip';
+import RolePreviewTabs from '../../primitives/RolePreviewTabs';
+import CoveragePreview from '../../primitives/CoveragePreview';
+import type { SeverityLevel } from '../../primitives/SeverityChip';
 
 export function DeclareIncident() {
-  const { setDrawerContent } = useAppContext();
+  const { declareIncident, setDrawerContent } = useAppContext();
+  const [step, setStep] = useState<1 | 2 | 3 | 4 | 5>(1);
+  const [severity, setSeverity] = useState<SeverityLevel>(3);
+  const [title, setTitle] = useState('Drawn incident · Bedok flooding');
+  const [allSeen, setAllSeen] = useState(false);
+  const submit = () => {
+    declareIncident({
+      kind: 'flood',
+      title,
+      severity,
+      location: { lng: 103.93, lat: 1.32 },
+      area: [
+        { lng: 103.918, lat: 1.318 },
+        { lng: 103.942, lat: 1.318 },
+        { lng: 103.942, lat: 1.328 },
+        { lng: 103.918, lat: 1.328 },
+      ],
+      source: 'ops declaration',
+    });
+    setStep(5);
+  };
   return (
-    <div className="p-6 flex flex-col h-full bg-surface-0">
-      <div className="border-b border-border-strong pb-4 mb-6 flex items-center justify-between">
-         <h2 className="text-sm font-black uppercase tracking-widest text-accent-critical">Manual Declaration</h2>
-         <span className="text-[9px] font-bold tracking-widest bg-surface-3 text-text-inverse px-3 py-1.5 border border-border-strong shadow-[2px_2px_0px_rgba(26,26,26,1)]">OPS OVERRIDE</span>
+    <div className="flex flex-col h-full">
+      <div className="px-5 py-3 border-b border-border-strong flex gap-2">
+        {[1, 2, 3, 4].map((s) => (
+          <div
+            key={s}
+            className={`flex-1 h-2 border border-border-strong ${
+              s <= step ? 'bg-text-primary' : 'bg-surface-2'
+            }`}
+          />
+        ))}
       </div>
-      
-      <div className="flex-1 overflow-y-auto pr-2 pb-4 flex flex-col gap-8">
-         <div className="border-l-4 border-accent-critical pl-4">
-            <label className="text-[10px] font-black uppercase tracking-widest block mb-3">Severity & Type</label>
-            <div className="flex gap-2">
-               <select className="flex-1 border border-border-strong p-3 text-xs font-bold bg-surface-1 appearance-none cursor-pointer focus:border-text-primary outline-none text-text-primary rounded-none shadow-[2px_2px_0px_rgba(26,26,26,1)]">
-                  <option>Critical</option>
-                  <option>Warning</option>
-                  <option>Advisory</option>
-               </select>
-               <select className="flex-1 border border-border-strong p-3 text-xs font-bold bg-surface-1 appearance-none cursor-pointer focus:border-text-primary outline-none text-text-primary rounded-none shadow-[2px_2px_0px_rgba(26,26,26,1)]">
-                  <option>Fire/Explosion</option>
-                  <option>Medical Emergency</option>
-                  <option>Kinetic Hazard</option>
-               </select>
+      {step === 1 && (
+        <div className="p-5 flex flex-col gap-4 flex-1">
+          <h2 className="text-xl font-serif italic font-black">Declare incident</h2>
+          <Field label="Title">
+            <input
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              className="w-full p-2 border border-border-strong bg-surface-0 text-sm font-mono outline-none focus:border-text-primary"
+            />
+          </Field>
+          <Field label="Severity">
+            <div className="flex gap-1">
+              {[1, 2, 3, 4, 5].map((lvl) => (
+                <button
+                  key={lvl}
+                  onClick={() => setSeverity(lvl as SeverityLevel)}
+                  className={`flex-1 py-2 border border-border-strong text-[10px] font-mono font-bold shadow-[2px_2px_0_rgba(26,26,26,1)] ${
+                    severity === lvl ? 'bg-surface-3 text-text-inverse' : 'bg-surface-0'
+                  }`}
+                >
+                  L{lvl}
+                </button>
+              ))}
             </div>
-         </div>
-         
-         <div className="border-l-4 border-accent-info pl-4">
-            <label className="text-[10px] font-black uppercase tracking-widest block mb-3">Visibility Scope</label>
-            <div className="flex flex-col gap-3">
-               <label className="flex items-center gap-3 cursor-pointer border border-border-strong p-4 bg-surface-2 hover:bg-surface-1 transition-colors shadow-[2px_2px_0px_rgba(26,26,26,1)] relative group">
-                  <div className="w-4 h-4 border border-border-strong bg-surface-3 rounded-none flex items-center justify-center relative">
-                      <div className="w-2 h-2 bg-surface-0 border border-border-strong opacity-100"></div>
+            <div className="mt-2">
+              <SeverityChip level={severity} />
+            </div>
+          </Field>
+        </div>
+      )}
+      {step === 2 && (
+        <div className="p-5 flex flex-col gap-3 flex-1">
+          <h3 className="text-[10px] uppercase font-bold tracking-widest">Step 2 · Geometry</h3>
+          <Card>Polygon drawn on the map. Coverage preview below.</Card>
+          <CoveragePreview
+            cells={4}
+            precision="gh5"
+            estimatedDevices={2720}
+            estimatedResidents={8400}
+          />
+        </div>
+      )}
+      {step === 3 && (
+        <div className="p-5 flex flex-col gap-3 flex-1">
+          <h3 className="text-[10px] uppercase font-bold tracking-widest">Step 3 · Sources</h3>
+          <Card>Reports + sensor signals attached automatically.</Card>
+          <ul className="text-[10px] uppercase font-bold tracking-widest space-y-1">
+            {['REP-4920 medical', 'REP-4921 fire', 'NEA PSI live'].map((s) => (
+              <li
+                key={s}
+                className="flex justify-between border border-border-strong p-2 bg-surface-0 shadow-[2px_2px_0_rgba(26,26,26,1)]"
+              >
+                <span>{s}</span>
+                <CheckCircle2 className="w-3 h-3 text-accent-success" />
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {step === 4 && (
+        <div className="p-5 flex flex-col gap-3 flex-1">
+          <h3 className="text-[10px] uppercase font-bold tracking-widest">Step 4 · Role-preview gate</h3>
+          <p className="text-[10px] uppercase font-bold tracking-widest text-text-secondary">
+            Tap each tab to unlock publish.
+          </p>
+          <RolePreviewTabs
+            onAllSeen={() => setAllSeen(true)}
+            tabs={[
+              {
+                role: 'citizen',
+                label: 'Citizen view',
+                content: (
+                  <div className="space-y-2">
+                    <SeverityChip level={severity} audience="citizen" showCode={false} />
+                    <h4 className="text-base font-serif italic font-black">{title}</h4>
+                    <p className="text-[11px]">Avoid the area. Help is being coordinated.</p>
                   </div>
-                  <span className="text-xs font-bold uppercase tracking-widest text-text-primary">Public (All Citizens)</span>
-               </label>
-               <label className="flex items-center gap-3 cursor-pointer border border-border-strong p-4 bg-surface-2 opacity-60 hover:opacity-100 transition-opacity">
-                  <div className="w-4 h-4 border border-border-strong bg-surface-0 rounded-none"></div>
-                  <span className="text-xs font-bold uppercase tracking-widest text-text-primary">Role-Gated (Responders Only)</span>
-               </label>
-            </div>
-         </div>
-
-         <div className="border-l-4 border-border-strong pl-4">
-             <label className="text-[10px] font-black uppercase tracking-widest block mb-3">Details</label>
-             <textarea className="w-full border border-border-strong p-4 text-xs font-medium bg-surface-1 h-32 outline-none resize-none shadow-[inset_2px_2px_0px_rgba(26,26,26,0.05)] focus:border-text-primary" placeholder="Provide tactical summary for the incident..." />
-         </div>
-      </div>
-      
-      <div className="pt-6 border-t border-border-strong mt-4">
-         <button onClick={() => setDrawerContent(null)} className="w-full bg-accent-critical text-text-inverse py-4 text-[10px] uppercase font-black tracking-widest shadow-[4px_4px_0px_rgba(26,26,26,1)] border border-border-strong hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none transition-all flex items-center justify-center gap-3 cursor-pointer">
-           <ShieldAlert className="w-5 h-5" /> Declare Incident
-         </button>
-      </div>
+                ),
+              },
+              {
+                role: 'responder',
+                label: 'Responder view',
+                content: (
+                  <div className="space-y-2">
+                    <SeverityChip level={severity} />
+                    <h4 className="text-base font-serif italic font-black">{title}</h4>
+                    <p className="text-[11px]">Polygon, 4 gh5 cells. 3 sources attached.</p>
+                  </div>
+                ),
+              },
+              {
+                role: 'ops',
+                label: 'Ops view',
+                content: (
+                  <div className="space-y-2">
+                    <SeverityChip level={severity} />
+                    <h4 className="text-base font-serif italic font-black">{title}</h4>
+                    <p className="text-[11px]">Lifecycle TTL 4h. Auto-escalate if &gt;6 reports / 30min.</p>
+                  </div>
+                ),
+              },
+            ]}
+          />
+        </div>
+      )}
+      {step === 5 && (
+        <div className="p-5 flex flex-col gap-3 flex-1">
+          <h3 className="text-xl font-serif italic font-black text-accent-success">Published.</h3>
+          <Card>Incident is now on the map for all roles.</Card>
+          <button
+            onClick={() => setDrawerContent(null)}
+            className="w-full bg-surface-3 text-text-inverse py-3 text-[10px] uppercase font-bold tracking-widest border border-border-strong shadow-[3px_3px_0_rgba(26,26,26,1)]"
+          >
+            Done
+          </button>
+        </div>
+      )}
+      {step <= 4 && (
+        <div className="p-4 border-t border-border-strong flex gap-2">
+          <button
+            onClick={() => (step === 1 ? setDrawerContent(null) : setStep((step - 1) as 1 | 2 | 3 | 4))}
+            className="flex-1 py-3 border border-border-strong text-[10px] font-bold uppercase tracking-widest"
+          >
+            Back
+          </button>
+          <button
+            onClick={() => (step < 4 ? setStep((step + 1) as 2 | 3 | 4) : allSeen ? submit() : null)}
+            disabled={step === 4 && !allSeen}
+            className={`flex-1 py-3 border border-border-strong shadow-[3px_3px_0_rgba(26,26,26,1)] text-[10px] font-bold uppercase tracking-widest ${
+              step === 4 && !allSeen
+                ? 'bg-surface-2 text-text-muted cursor-not-allowed'
+                : 'bg-accent-success text-surface-3'
+            }`}
+          >
+            {step < 4 ? 'Next' : 'Publish'}
+          </button>
+        </div>
+      )}
     </div>
-  )
+  );
+}
+
+export function IncidentOps() {
+  const { events, selectedId } = useAppContext();
+  const event = events.find((e) => e.id === selectedId) ?? events[0];
+  if (!event) return null;
+  return (
+    <div className="p-5 flex flex-col gap-3">
+      <div className="flex items-center gap-2 flex-wrap">
+        <SeverityChip level={event.severity} />
+        <h2 className="text-xl font-serif italic font-black flex-1 min-w-0">{event.title}</h2>
+      </div>
+      {event.liveValue && (
+        <div className="px-3 py-2 bg-accent-info text-text-inverse font-mono text-[11px] border border-border-strong shadow-[2px_2px_0_rgba(26,26,26,1)]">
+          LIVE · {event.liveValue}
+        </div>
+      )}
+      <Card>
+        <strong className="block uppercase text-[10px] tracking-widest mb-1">Source</strong>
+        {event.source}
+      </Card>
+      <Card>
+        <strong className="block uppercase text-[10px] tracking-widest mb-1">Status</strong>
+        <span className="font-mono">{event.status}</span>
+      </Card>
+      <Card>
+        <strong className="block uppercase text-[10px] tracking-widest mb-1">Coordinates</strong>
+        <span className="font-mono text-[11px]">
+          {event.location.lat.toFixed(4)}°N · {event.location.lng.toFixed(4)}°E
+        </span>
+      </Card>
+      {event.caseId && (
+        <Card>
+          <strong className="block uppercase text-[10px] tracking-widest mb-1">Linked case</strong>
+          {event.caseId}
+        </Card>
+      )}
+    </div>
+  );
 }
 
 export function DispatchResponder() {
-  const { setDrawerContent } = useAppContext();
+  const { responders, sosSessions, assignSos, setDrawerContent } = useAppContext();
+  const pending = sosSessions.find((s) => s.status === 'requesting');
+  const available = responders.filter((r) => r.status === 'ready');
   return (
-    <div className="flex flex-col h-full bg-surface-0">
-      <div className="p-6 border-b border-border-strong bg-surface-1">
-          <h2 className="text-sm font-black uppercase tracking-widest">Direct Dispatch</h2>
-          <p className="text-[10px] font-bold uppercase tracking-widest text-text-secondary mt-1">Target: Area GH-2Z / Resource: MED-1</p>
-      </div>
-      <div className="p-6 flex-1 flex flex-col gap-6 overflow-y-auto">
-          <div className="flex items-center justify-between pb-3 border-b border-border-strong">
-             <span className="text-[10px] font-black uppercase tracking-widest">Candidate Roster</span>
-             <span className="text-[9px] border border-border-strong px-2 py-1 font-bold shadow-[2px_2px_0px_rgba(26,26,26,1)] bg-surface-0">Sort: Score</span>
-          </div>
-          
-          <div className="flex flex-col gap-4">
-             <div className="border border-border-strong p-4 bg-accent-info text-surface-0 shadow-[4px_4px_0px_rgba(26,26,26,1)] cursor-pointer hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none transition-all">
-                <div className="flex justify-between items-center mb-2">
-                   <h4 className="text-xs font-black uppercase tracking-widest">Unit Bravo-9 (SCDF)</h4>
-                   <span className="text-[10px] font-bold font-mono border border-surface-0 px-2 flex items-center justify-center h-[20px]">1.2km</span>
+    <div className="p-5 flex flex-col gap-3">
+      <h2 className="text-xl font-serif italic font-black">Dispatch</h2>
+      {pending ? (
+        <>
+          <Card>
+            <strong className="block uppercase text-[10px] tracking-widest mb-1">Target</strong>
+            {pending.id} · {pending.category}
+          </Card>
+          <h3 className="text-[10px] uppercase font-bold tracking-widest">Available roster</h3>
+          {available.map((r) => (
+            <div
+              key={r.id}
+              className="flex items-center justify-between p-2 border border-border-strong bg-surface-0 shadow-[2px_2px_0_rgba(26,26,26,1)]"
+            >
+              <div>
+                <div className="text-[10px] font-bold uppercase tracking-widest">
+                  {r.name} · {r.org}
                 </div>
-                <div className="flex gap-3 text-[9px] uppercase font-bold tracking-widest opacity-90 mt-3 border-t border-surface-0/30 pt-3">
-                   <span>Score: 0.94</span>
-                   <span className="opacity-50">/</span>
-                   <span>ETA: 4m</span>
-                   <span className="opacity-50">/</span>
-                   <span>Available</span>
+                <div className="text-[9px] uppercase tracking-widest text-text-secondary">
+                  {r.role} · {r.status}
                 </div>
-             </div>
-             
-             <div className="border border-border-strong p-4 bg-surface-2 cursor-pointer hover:bg-surface-3 hover:text-text-inverse transition-all opacity-80 shadow-[2px_2px_0px_rgba(26,26,26,1)]">
-                <div className="flex justify-between items-center mb-2">
-                   <h4 className="text-xs font-black uppercase tracking-widest text-text-primary">Unit Charlie-3 (Vol)</h4>
-                   <span className="text-[10px] font-bold font-mono border border-border-strong px-2 flex items-center justify-center h-[20px]">2.8km</span>
-                </div>
-                <div className="flex gap-3 text-[9px] uppercase font-bold tracking-widest text-text-secondary mt-3 border-t border-border-strong/20 pt-3">
-                   <span>Score: 0.72</span>
-                   <span className="opacity-50">/</span>
-                   <span>ETA: 11m</span>
-                   <span className="opacity-50">/</span>
-                   <span>Busy</span>
-                </div>
-             </div>
-          </div>
-      </div>
-      
-      <div className="p-6 border-t border-border-strong bg-surface-1">
-         <button onClick={() => setDrawerContent(null)} className="w-full bg-surface-3 text-text-inverse py-4 border border-border-strong text-[10px] uppercase font-black tracking-widest shadow-[4px_4px_0px_rgba(26,26,26,1)] hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none transition-all cursor-pointer">Send Dispatch Order</button>
-      </div>
+              </div>
+              <button
+                onClick={() => {
+                  assignSos(pending.id, r.id);
+                  setDrawerContent(null);
+                }}
+                className="bg-surface-3 text-text-inverse px-3 py-1 text-[9px] font-bold uppercase tracking-widest border border-border-strong shadow-[2px_2px_0_rgba(26,26,26,1)]"
+              >
+                Assign
+              </button>
+            </div>
+          ))}
+        </>
+      ) : (
+        <Card>No pending distress. Dispatch is idle.</Card>
+      )}
     </div>
-  )
+  );
 }
 
 export function BroadcastComposer() {
-  const { setDrawerContent } = useAppContext();
   return (
-     <div className="flex flex-col h-full bg-surface-0 relative">
-        <div className="p-6 border-b border-border-strong bg-accent-warning text-surface-3 flex items-center gap-4 shadow-[0px_4px_0px_rgba(26,26,26,1)] z-10 relative">
-           <RadioTower className="w-8 h-8" />
-           <div>
-              <h2 className="text-sm font-black uppercase tracking-widest">Geo-Broadcast</h2>
-              <p className="text-[10px] font-bold tracking-widest opacity-80 uppercase mt-0.5">Reach: ~1,404 Devices in target polygon</p>
-           </div>
-        </div>
-        
-        <div className="p-6 flex-1 flex flex-col gap-8 overflow-y-auto">
-           <div className="relative pl-8">
-              <div className="absolute left-[7px] top-0 bottom-0 w-[1px] bg-border-strong opacity-20"></div>
-              
-              <div className="relative mb-8 pt-2">
-                 <div className="absolute -left-8 w-4 h-4 border border-border-strong bg-surface-3 top-2 rounded-none shadow-[2px_2px_0px_rgba(26,26,26,1)]"></div>
-                 <h3 className="text-[10px] font-black uppercase tracking-widest mb-3">Audience Scope</h3>
-                 <div className="flex gap-3">
-                    <button className="flex-1 bg-surface-3 text-text-inverse p-3 text-[10px] font-bold uppercase tracking-widest border border-border-strong shadow-[2px_2px_0px_rgba(26,26,26,1)] cursor-pointer">Citizens + Resp</button>
-                    <button className="flex-1 bg-surface-1 text-text-primary p-3 text-[10px] font-bold uppercase tracking-widest border border-border-strong opacity-50 hover:opacity-100 transition-opacity cursor-pointer">Citizens Only</button>
-                 </div>
-              </div>
-              
-              <div className="relative mb-4 pt-2">
-                 <div className="absolute -left-8 w-4 h-4 border border-border-strong bg-accent-critical top-2 shadow-[2px_2px_0px_rgba(26,26,26,1)] rounded-none"></div>
-                 <h3 className="text-[10px] font-black uppercase tracking-widest mb-3">Content</h3>
-                 <input type="text" placeholder="TITLE (Max 40 chars)" className="w-full bg-surface-1 border border-border-strong p-4 mb-3 text-sm font-bold shadow-[inset_2px_2px_0px_rgba(26,26,26,0.05)] outline-none focus:border-text-primary uppercase tracking-wider" />
-                 <textarea placeholder="Message body..." className="w-full bg-surface-1 border border-border-strong p-4 h-24 text-sm font-medium shadow-[inset_2px_2px_0px_rgba(26,26,26,0.05)] outline-none resize-none mb-4 focus:border-text-primary" />
-                 <div className="flex items-center gap-3 bg-surface-2 p-3 border border-border-strong">
-                    <span className="text-[10px] font-bold uppercase tracking-widest text-text-secondary">Locales:</span>
-                    <span className="px-3 py-1 bg-surface-0 border border-border-strong text-[10px] font-bold shadow-[2px_2px_0px_rgba(26,26,26,1)]">EN</span>
-                    <span className="px-3 py-1 bg-surface-0 border border-border-strong text-[10px] font-bold border-dashed opacity-60 cursor-pointer hover:opacity-100">+ Add</span>
-                 </div>
-              </div>
-           </div>
-        </div>
-        
-        <div className="p-6 border-t border-border-strong bg-surface-1 gap-4 flex flex-col relative z-20">
-           <div className="flex items-center justify-between mb-2">
-              <span className="text-[10px] font-bold uppercase tracking-widest">Target Selection</span>
-              <span className="text-[10px] font-bold uppercase tracking-widest text-accent-success flex items-center gap-1">
-                <span className="w-2 h-2 bg-accent-success border border-border-strong"></span> Valid Polygon
-              </span>
-           </div>
-           <button onClick={() => setDrawerContent(null)} className="w-full py-4 bg-accent-warning text-surface-3 border border-border-strong text-xs font-black uppercase tracking-widest shadow-[4px_4px_0px_rgba(26,26,26,1)] hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-[0px_0px_0px_rgba(26,26,26,1)] transition-all flex items-center justify-center gap-3 cursor-pointer">
-              <RadioTower className="w-5 h-5"/> Issue Broadcast Directive
-           </button>
-        </div>
-     </div>
-  )
+    <div className="p-5 flex flex-col gap-3">
+      <h2 className="text-xl font-serif italic font-black">Geo broadcast</h2>
+      <Card>Draw a polygon or select cells on the map. Coverage preview is mandatory.</Card>
+      <CoveragePreview
+        cells={18}
+        precision="gh5"
+        estimatedDevices={12400}
+        estimatedResidents={38000}
+        highReachWarning
+      />
+      <Field label="Message">
+        <textarea
+          className="w-full h-24 p-2 border border-border-strong bg-surface-0 text-sm font-mono resize-none outline-none focus:border-text-primary"
+          defaultValue="Heavy flooding at Bedok South Rd. Avoid area. Stay clear of moving water."
+        />
+      </Field>
+      <button className="bg-accent-critical text-text-inverse py-3 text-[10px] uppercase font-bold tracking-widest border border-border-strong shadow-[3px_3px_0_rgba(26,26,26,1)] flex items-center justify-center gap-2">
+        <Megaphone className="w-3 h-3" />
+        Send broadcast
+      </button>
+    </div>
+  );
 }
 
-export function OpsGenericList({ title, items }: { title: string, items: any[] }) {
-  const { setDrawerContent } = useAppContext();
+export function ReportQueue() {
+  const { reports, verifyReport, dismissReport, claimReport } = useAppContext();
+  const queue = reports.filter((r) => r.status === 'pending' || r.status === 'claimed');
   return (
-    <div className="flex flex-col h-full bg-surface-0">
-      <div className="p-6 border-b border-border-strong bg-surface-3 text-text-inverse">
-        <h2 className="text-sm font-black uppercase tracking-widest">{title}</h2>
+    <div className="flex flex-col h-full">
+      <div className="p-4 border-b border-border-strong">
+        <h2 className="text-xl font-serif italic font-black">Report queue</h2>
+        <p className="text-[10px] uppercase font-bold tracking-widest text-text-secondary">
+          {queue.length} pending · {reports.filter((r) => r.status === 'verified').length} verified
+        </p>
       </div>
-      <div className="flex-1 overflow-y-auto p-6 flex flex-col gap-4">
-         {items.map((item, i) => (
-           <div key={i} className="border border-border-strong p-4 bg-surface-0 shadow-[4px_4px_0px_rgba(26,26,26,1)] hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none transition-all cursor-pointer" onClick={() => item.targetId ? setDrawerContent(item.targetId) : null}>
-              <div className="flex justify-between items-center mb-2 border-b border-border-strong pb-2">
-                 <h4 className="text-[10px] font-black uppercase tracking-widest text-text-primary">{item.title}</h4>
-                 <span className="text-[9px] font-bold opacity-60 uppercase">{item.time}</span>
-              </div>
-              <p className="text-xs font-medium text-text-secondary leading-relaxed mt-2">{item.desc}</p>
-           </div>
-         ))}
+      <div className="flex-1 overflow-y-auto">
+        {queue.map((r) => (
+          <div key={r.id} className="p-3 border-b border-border-strong">
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-[10px] font-mono font-bold">{r.id}</span>
+              <span className="text-[9px] uppercase font-bold tracking-widest text-text-secondary">
+                {r.kind} · trust {Math.round(r.reporterTrust * 100)}%
+              </span>
+            </div>
+            <h3 className="text-[11px] font-bold uppercase tracking-widest mb-1">{r.title}</h3>
+            <p className="text-[10px]">{r.body}</p>
+            <div className="flex gap-1 mt-2">
+              <button
+                onClick={() => claimReport(r.id, 'ops')}
+                className="flex-1 bg-surface-0 py-1.5 text-[9px] uppercase font-bold tracking-widest border border-border-strong"
+              >
+                Claim
+              </button>
+              <button
+                onClick={() => verifyReport(r.id)}
+                className="flex-1 bg-accent-success text-surface-3 py-1.5 text-[9px] uppercase font-bold tracking-widest border border-border-strong shadow-[2px_2px_0_rgba(26,26,26,1)]"
+              >
+                <CheckCircle2 className="w-3 h-3 inline mr-1" />
+                Verify
+              </button>
+              <button
+                onClick={() => dismissReport(r.id)}
+                className="flex-1 bg-surface-0 py-1.5 text-[9px] uppercase font-bold tracking-widest border border-border-strong"
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        ))}
       </div>
     </div>
-  )
+  );
+}
+
+export function DistressOversight() {
+  const { sosSessions, responders, setDrawerContent } = useAppContext();
+  const active = sosSessions.filter((s) => !['resolved', 'cancelled'].includes(s.status));
+  return (
+    <div className="flex flex-col h-full">
+      <div className="p-4 border-b border-border-strong">
+        <h2 className="text-xl font-serif italic font-black">Distress oversight</h2>
+        <p className="text-[10px] uppercase font-bold tracking-widest text-text-secondary">
+          {active.length} active
+        </p>
+      </div>
+      <div className="flex-1 overflow-y-auto">
+        {active.map((s) => {
+          const r = responders.find((x) => x.id === s.assignedResponderId);
+          return (
+            <div key={s.id} className="p-3 border-b border-border-strong">
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-[10px] font-mono font-bold">{s.id}</span>
+                <span className="text-[9px] uppercase font-bold tracking-widest">{s.status}</span>
+              </div>
+              <h3 className="text-[11px] font-bold uppercase tracking-widest mb-1">{s.category}</h3>
+              <p className="text-[10px] uppercase font-bold tracking-widest text-text-secondary">
+                Citizen {s.citizenName}
+              </p>
+              {r ? (
+                <p className="text-[10px] uppercase font-bold tracking-widest mt-1">
+                  Assigned · {r.name}
+                </p>
+              ) : (
+                <button
+                  onClick={() => setDrawerContent('dispatch')}
+                  className="mt-2 w-full bg-accent-critical text-text-inverse py-2 text-[9px] uppercase font-bold tracking-widest border border-border-strong shadow-[2px_2px_0_rgba(26,26,26,1)]"
+                >
+                  <AlertOctagon className="w-3 h-3 inline mr-1" />
+                  Dispatch now
+                </button>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+export function CaseOversight() {
+  const { cases, setDrawerContent, setActiveCaseId } = useAppContext();
+  return (
+    <div className="flex flex-col h-full">
+      <div className="p-4 border-b border-border-strong">
+        <h2 className="text-xl font-serif italic font-black">Case oversight</h2>
+      </div>
+      <div className="flex-1 overflow-y-auto">
+        {cases.map((c) => (
+          <button
+            key={c.id}
+            onClick={() => {
+              setActiveCaseId(c.id);
+              setDrawerContent('case_lobby');
+            }}
+            className="w-full p-3 border-b border-border-strong text-left hover:bg-surface-2 flex items-center gap-3"
+          >
+            <SeverityChip level={c.severity} />
+            <div className="flex-1">
+              <div className="text-[11px] font-bold uppercase tracking-widest">{c.name}</div>
+              <div className="text-[9px] uppercase tracking-widest text-text-secondary">
+                {c.state} · {c.members.length} members
+              </div>
+            </div>
+            <Eye className="w-3 h-3" />
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+export function ResponderOversight() {
+  const { responders } = useAppContext();
+  return (
+    <div className="flex flex-col h-full">
+      <div className="p-4 border-b border-border-strong">
+        <h2 className="text-xl font-serif italic font-black">Responder roster</h2>
+        <p className="text-[10px] uppercase font-bold tracking-widest text-text-secondary">
+          {responders.length} total
+        </p>
+      </div>
+      <div className="flex-1 overflow-y-auto">
+        {responders.map((r) => (
+          <div key={r.id} className="p-3 border-b border-border-strong flex items-center gap-2">
+            <span
+              className={`w-2 h-2 border border-border-strong ${
+                r.status === 'on_scene'
+                  ? 'bg-accent-critical'
+                  : r.status === 'en_route'
+                  ? 'bg-accent-warning'
+                  : r.status === 'ready'
+                  ? 'bg-accent-success'
+                  : 'bg-surface-3'
+              }`}
+            />
+            <div className="flex-1">
+              <div className="text-[11px] font-bold uppercase tracking-widest">
+                {r.name} · {r.org}
+              </div>
+              <div className="text-[9px] uppercase tracking-widest text-text-secondary">
+                {r.role} · {r.status}
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+export function SourceHealth() {
+  const { sources, liveSnapshot } = useAppContext();
+  return (
+    <div className="flex flex-col h-full">
+      <div className="p-4 border-b border-border-strong">
+        <h2 className="text-xl font-serif italic font-black">Source health</h2>
+        {liveSnapshot && (
+          <p className="text-[10px] uppercase font-bold tracking-widest text-text-secondary mt-1">
+            Live NEA: PSI {liveSnapshot.psi[0]?.psi24h ?? '—'} · {liveSnapshot.rainfall.length} stations · {liveSnapshot.forecast.length} forecast areas
+          </p>
+        )}
+      </div>
+      <div className="flex-1 overflow-y-auto">
+        {sources.map((s) => (
+          <div key={s.id} className="p-3 border-b border-border-strong flex items-center gap-2">
+            <span
+              className={`w-2 h-2 border border-border-strong ${
+                s.state === 'fresh'
+                  ? 'bg-accent-success'
+                  : s.state === 'stale'
+                  ? 'bg-accent-warning'
+                  : 'bg-accent-critical'
+              }`}
+            />
+            <div className="flex-1">
+              <div className="text-[11px] font-bold uppercase tracking-widest">{s.name}</div>
+              <div className="text-[9px] uppercase tracking-widest text-text-secondary">
+                {s.state} · last {s.lastAgeS}s ago
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex flex-col gap-1">
+      <label className="text-[9px] uppercase font-bold tracking-widest text-text-secondary">
+        {label}
+      </label>
+      {children}
+    </div>
+  );
+}
+
+function Card({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="bg-surface-2 border border-border-strong p-3 text-sm leading-relaxed shadow-[3px_3px_0_rgba(26,26,26,1)]">
+      {children}
+    </div>
+  );
 }
