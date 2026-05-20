@@ -1,4 +1,4 @@
-import { Activity, ClipboardCheck, MapPinned, Radio, ShieldCheck, UserRound } from 'lucide-react';
+import { LockKeyhole, Mail, Radio, ShieldCheck, UserRound } from 'lucide-react';
 import { useAppContext, type Role } from '../AppContext';
 
 const roles: Array<{
@@ -35,42 +35,65 @@ export default function DemoLogin() {
   const { demoLogin } = useAppContext();
 
   return (
-    <main className="min-h-screen bg-surface-0 text-text-primary grid lg:grid-cols-[0.95fr_1.05fr]">
-      <section className="border-r-2 border-border-strong p-6 sm:p-10 flex flex-col justify-between gap-8 bg-surface-3 text-text-inverse">
-        <div>
-          <div className="inline-flex items-center gap-2 border-2 border-border-strong bg-accent-warning text-text-primary px-3 py-1 shadow-[3px_3px_0px_rgba(26,26,26,1)]">
-            <Activity className="w-4 h-4" />
-            <span className="text-[10px] font-black uppercase tracking-widest">Demo shell</span>
-          </div>
-          <h1 className="mt-8 text-4xl sm:text-6xl font-black uppercase leading-none max-w-[11ch]">
+    <main className="min-h-screen bg-surface-0 text-text-primary flex flex-col">
+      <section className="bg-surface-3 text-text-inverse px-6 py-8 sm:px-10 sm:py-12 border-b-2 border-border-strong">
+        <div className="max-w-5xl mx-auto">
+          <h1 className="text-4xl sm:text-6xl font-black uppercase leading-none max-w-[11ch]">
             Kampung Kaki
           </h1>
-          <p className="mt-5 max-w-xl text-sm sm:text-base font-medium text-white/80 leading-relaxed">
-            Frontend prototype for role workflows. Demo login skips authentication so teammates can start testing the shell immediately.
+          <p className="mt-4 max-w-xl text-sm sm:text-base font-medium text-white/80 leading-relaxed">
+            Secure access for citizens, qualified responders, and operations teams.
           </p>
-        </div>
-
-        <div className="grid sm:grid-cols-2 gap-3 text-text-primary">
-          <DemoFact icon={MapPinned} label="Real map" value="OneMap tiles render live" />
-          <DemoFact icon={ClipboardCheck} label="Demo data" value="Injected states are labelled" />
         </div>
       </section>
 
-      <section className="p-5 sm:p-8 lg:p-10 flex items-center">
-        <div className="w-full max-w-3xl mx-auto">
-          <div className="mb-5">
+      <section className="flex-1 px-5 py-6 sm:px-8 lg:px-10">
+        <div className="w-full max-w-5xl mx-auto grid lg:grid-cols-[0.92fr_1.08fr] gap-6 lg:gap-8 items-start">
+          <div className="border-2 border-border-strong bg-surface-0 p-5 sm:p-6 shadow-[6px_6px_0px_rgba(26,26,26,1)]">
             <p className="text-[10px] font-black uppercase tracking-widest text-accent-critical">
-              Select a demo role
+              Account login
             </p>
             <h2 className="text-2xl sm:text-3xl font-black uppercase mt-1">
-              Auto-login workspace
+              Sign in
             </h2>
-            <p className="text-xs sm:text-sm text-text-secondary font-medium mt-2">
-              No password, no backend auth. This is intentionally a demo entry point until real authentication is wired.
+            <div className="mt-5 flex flex-col gap-3">
+              <label className="flex flex-col gap-1">
+                <span className="text-[9px] font-black uppercase tracking-widest text-text-secondary">Email</span>
+                <span className="flex items-center gap-2 border border-border-strong bg-surface-0 px-3 py-2">
+                  <Mail className="w-4 h-4" />
+                  <input className="min-w-0 flex-1 bg-transparent outline-none text-sm font-mono" placeholder="name@example.sg" />
+                </span>
+              </label>
+              <label className="flex flex-col gap-1">
+                <span className="text-[9px] font-black uppercase tracking-widest text-text-secondary">Password</span>
+                <span className="flex items-center gap-2 border border-border-strong bg-surface-0 px-3 py-2">
+                  <LockKeyhole className="w-4 h-4" />
+                  <input className="min-w-0 flex-1 bg-transparent outline-none text-sm font-mono" type="password" placeholder="********" />
+                </span>
+              </label>
+              <button
+                type="button"
+                className="mt-2 w-full bg-surface-3 text-text-inverse py-3 text-[10px] uppercase font-black tracking-widest border border-border-strong shadow-[3px_3px_0_rgba(26,26,26,1)]"
+              >
+                Sign in
+              </button>
+            </div>
+            <p className="mt-4 text-[10px] uppercase font-bold tracking-widest text-text-secondary leading-relaxed">
+              Authentication is not connected in this prototype. Use the labelled demo accounts for hackathon testing.
             </p>
           </div>
 
-          <div className="grid gap-4">
+          <div>
+            <div className="mb-4">
+              <p className="text-[10px] font-black uppercase tracking-widest text-accent-critical">
+                Demo accounts
+              </p>
+              <h2 className="text-2xl sm:text-3xl font-black uppercase mt-1">
+                Continue as role
+              </h2>
+            </div>
+
+            <div className="grid gap-3">
             {roles.map((item) => (
               <button
                 key={item.role}
@@ -85,7 +108,7 @@ export default function DemoLogin() {
                     <div className="flex flex-wrap items-center gap-2">
                       <h3 className="text-lg font-black uppercase">{item.title}</h3>
                       <span className="text-[9px] font-black uppercase tracking-widest border border-border-strong px-2 py-0.5 bg-accent-warning">
-                        Auto login
+                        Demo account
                       </span>
                     </div>
                     <p className="text-sm text-text-secondary font-medium mt-1">{item.description}</p>
@@ -96,27 +119,10 @@ export default function DemoLogin() {
                 </div>
               </button>
             ))}
+            </div>
           </div>
         </div>
       </section>
     </main>
-  );
-}
-
-function DemoFact({
-  icon: Icon,
-  label,
-  value,
-}: {
-  icon: typeof MapPinned;
-  label: string;
-  value: string;
-}) {
-  return (
-    <div className="border-2 border-border-strong bg-surface-0 p-3 shadow-[3px_3px_0px_rgba(26,26,26,1)]">
-      <Icon className="w-4 h-4 mb-2" />
-      <div className="text-[10px] font-black uppercase tracking-widest">{label}</div>
-      <div className="text-xs font-medium text-text-secondary mt-1">{value}</div>
-    </div>
   );
 }

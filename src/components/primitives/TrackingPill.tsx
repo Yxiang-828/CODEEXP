@@ -9,7 +9,7 @@ export default function TrackingPill() {
 
   return (
     <div
-      className="absolute bottom-24 left-1/2 -translate-x-1/2 z-20 bg-surface-0 border border-border-strong shadow-[6px_6px_0px_rgba(26,26,26,1)] flex items-stretch min-w-[300px] max-w-[480px]"
+      className="absolute bottom-28 sm:bottom-24 left-1/2 -translate-x-1/2 z-20 bg-surface-0 border border-border-strong shadow-[6px_6px_0px_rgba(26,26,26,1)] flex items-stretch w-[calc(100vw-24px)] sm:w-auto sm:min-w-[300px] sm:max-w-[480px]"
       role="status"
     >
       <div
