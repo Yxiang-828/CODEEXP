@@ -11,7 +11,14 @@ import {
   Calendar,
   User,
   ShieldCheck,
+  Send,
+  Clock,
+  MapPin,
+  Radio,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
+import { useState } from 'react';
 import type React from 'react';
 import { useAppContext } from '../../../AppContext';
 import type { CanonicalEvent, DistressSession, VolunteerEvent, Responder } from '../../../AppContext';
@@ -88,6 +95,7 @@ export function VerifyQueue() {
 
 export function FormCase() {
   const { events, requestCaseFormation, selfResponderId } = useAppContext();
+  const [requested, setRequested] = useState<Record<string, number>>({});
   const candidates = events.filter((e) => e.status === 'verified' && !e.caseId && e.kind !== 'weather');
   return (
     <div className="p-5 flex flex-col gap-3">
@@ -103,11 +111,24 @@ export function FormCase() {
               <div className="text-[9px] uppercase tracking-widest text-text-secondary">{event.kind} · {event.source}</div>
             </div>
           </div>
+          {requested[event.id] && (
+            <div className="mt-3 border border-border-strong bg-accent-success text-surface-3 px-2 py-2 text-[9px] uppercase font-black tracking-widest">
+              Request sent to ops · visible in ops logs and responder logs
+            </div>
+          )}
           <button
-            onClick={() => requestCaseFormation(event.id, selfResponderId)}
-            className="mt-3 w-full bg-surface-3 text-text-inverse py-2 text-[9px] uppercase font-bold tracking-widest border border-border-strong shadow-[2px_2px_0_rgba(26,26,26,1)]"
+            disabled={!!requested[event.id]}
+            onClick={() => {
+              requestCaseFormation(event.id, selfResponderId);
+              setRequested((prev) => ({ ...prev, [event.id]: Date.now() }));
+            }}
+            className={`mt-3 w-full py-2 text-[9px] uppercase font-bold tracking-widest border border-border-strong shadow-[2px_2px_0_rgba(26,26,26,1)] ${
+              requested[event.id]
+                ? 'bg-surface-2 text-text-secondary cursor-not-allowed'
+                : 'bg-surface-3 text-text-inverse'
+            }`}
           >
-            Request ops case
+            {requested[event.id] ? 'Request sent' : 'Request ops case'}
           </button>
         </div>
       ))}
@@ -458,58 +479,526 @@ export function ProfileWorkspace() {
 }
 
 export function MissionBoard() {
-  const { events, sosSessions, setSelectedId, setDrawerContent } = useAppContext();
-  const items: { id: string; title: string; meta: string; severity: 1 | 2 | 3 | 4 | 5; target: string }[] = [
-    ...sosSessions
-      .filter((s) => !['resolved', 'cancelled'].includes(s.status))
-      .map((s) => ({
-        id: s.id,
-        title: 'SOS · ' + s.category,
-        meta: 'live · ' + s.status,
+  const {
+    events,
+    sosSessions,
+    cases,
+    responders,
+    selfResponderId,
+    assignSos,
+    joinCase,
+    setActiveCaseId,
+    setDrawerContent,
+    actionLogs,
+    chat,
+    messageCitizen,
+    advanceSos,
+    confirmSosSafe,
+    updateResponderStatus,
+    sendChat,
+  } = useAppContext();
+  const [currentOpen, setCurrentOpen] = useState(true);
+  const [assignmentsOpen, setAssignmentsOpen] = useState(true);
+  const [joinableOpen, setJoinableOpen] = useState(true);
+  const [civilianMessage, setCivilianMessage] = useState('');
+  const [sentNotice, setSentNotice] = useState<string | null>(null);
+
+  const self = responders.find((r) => r.id === selfResponderId);
+  const origin = self?.location ?? { lng: 103.85, lat: 1.3 };
+  const assignedSos = sosSessions.find(
+    (s) => s.assignedResponderId === selfResponderId && !['resolved', 'cancelled'].includes(s.status)
+  );
+  const activeCases = cases.filter((c) => c.members.includes(selfResponderId) && c.state !== 'resolved');
+  const activeCase = activeCases[0];
+  const activeCaseEvent = activeCase ? events.find((e) => e.caseId === activeCase.id) : undefined;
+  const currentTarget = assignedSos
+    ? {
+        type: 'sos' as const,
+        id: assignedSos.id,
+        title: `${assignedSos.category} SOS`,
+        subtitle: `Citizen ${assignedSos.citizenName}`,
+        description: `Immediate citizen SOS. Status: ${assignedSos.status}. Completion needs responder and citizen acknowledgement.`,
         severity: 4 as const,
-        target: 'distress_oversight',
-      })),
-    ...events.map((e) => ({
-      id: e.id,
-      title: e.title + (e.liveValue ? ' · ' + e.liveValue : ''),
-      meta: e.source,
-      severity: e.severity,
-      target: 'incident_ops',
-    })),
-  ];
+        location: assignedSos.location,
+        kind: assignedSos.category,
+      }
+    : activeCase
+    ? {
+        type: 'case' as const,
+        id: activeCase.id,
+        title: activeCaseEvent?.title ?? `Case ${activeCase.name}`,
+        subtitle: `#${activeCase.name} · ${activeCase.state}`,
+        description:
+          activeCaseEvent?.kind === 'fire'
+            ? 'Ops-formed fire response. Volunteers support resident welfare and stay out of suppression zones.'
+            : activeCaseEvent
+            ? `${activeCaseEvent.kind} incident formed by ops. Follow case room instructions before moving.`
+            : 'Ops-formed case. Follow assigned role and case room instructions.',
+        severity: activeCase.severity,
+        location: activeCase.centroid,
+        kind: activeCaseEvent?.kind ?? 'case',
+      }
+    : null;
+
+  const openSos = filterWithinKm<DistressSession>(
+    sosSessions.filter((s) => s.status === 'requesting').map((s) => ({ ...s, location: s.location })),
+    origin,
+    8
+  );
+  const joinableCases = cases
+    .filter((c) => !c.members.includes(selfResponderId) && c.state !== 'resolved')
+    .map((c) => ({
+      caseRoom: c,
+      event: events.find((e) => e.caseId === c.id),
+      distanceKm: getDistanceKm(origin, c.centroid),
+    }))
+    .filter((c) => c.distanceKm <= 8)
+    .sort((a, b) => a.distanceKm - b.distanceKm);
+  const joinableCount = openSos.length + joinableCases.length;
+  const missionDistance = currentTarget ? getDistanceKm(origin, currentTarget.location) : null;
+  const missionEta = missionDistance === null ? 'Unavailable' : `${etaMinutes(missionDistance)} min`;
+  const missionUpdates = currentTarget
+    ? [
+        ...actionLogs
+          .filter((log) => log.targetId === currentTarget.id || (activeCaseEvent && log.targetId === activeCaseEvent.id))
+          .slice(0, 2)
+          .map((log) => `${log.actorRole}: ${log.message}`),
+        ...(currentTarget.type === 'case'
+          ? chat
+              .filter((entry) => entry.caseId === currentTarget.id)
+              .slice(-2)
+              .map((entry) => `${entry.kind === 'host' ? 'Host AI' : entry.authorId}: ${entry.text}`)
+          : []),
+      ].slice(-3)
+    : [];
+
+  const sendCivilianMessage = () => {
+    if (!currentTarget || !civilianMessage.trim()) return;
+    messageCitizen(currentTarget.id, selfResponderId, civilianMessage);
+    if (currentTarget.type === 'case') {
+      sendChat(currentTarget.id, selfResponderId, `[Citizen update] ${civilianMessage.trim()}`);
+    }
+    setSentNotice('Message queued to citizen notifications and audit log.');
+    setCivilianMessage('');
+  };
+
   return (
-    <div className="flex flex-col h-full">
-      <div className="p-4 border-b border-border-strong">
-        <h2 className="text-xl font-serif italic font-black">Bulletin</h2>
-        <p className="text-[10px] uppercase font-bold tracking-widest text-text-secondary">
-          {items.length} active across Singapore
+    <div className="flex flex-col h-full bg-surface-0">
+      <div className="p-4 border-b border-border-strong bg-surface-0">
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="text-xl font-serif italic font-black">Operational panel</h2>
+          <div className="flex items-center gap-2 text-[9px] uppercase font-black tracking-widest text-text-secondary">
+            <span className="w-2 h-2 rounded-full bg-accent-success border border-border-strong" />
+            Live
+          </div>
+        </div>
+        <p className="text-[10px] uppercase font-bold tracking-widest text-text-secondary mt-1">
+          Responder mission state, assignments, and nearby joinable work
         </p>
       </div>
-      <div className="flex-1 overflow-y-auto">
-        {items.map((it) => (
-          <button
-            key={it.id}
-            onClick={() => {
-              setSelectedId(it.id);
-              setDrawerContent(it.target);
-            }}
-            className="w-full flex items-center gap-3 p-3 border-b border-border-strong hover:bg-surface-2 text-left"
-          >
-            <SeverityChip level={it.severity} />
-            <div className="flex-1 min-w-0">
-              <div className="text-[10px] font-bold uppercase tracking-widest truncate">{it.title}</div>
-              <div className="text-[9px] uppercase tracking-widest text-text-secondary mt-0.5">{it.meta}</div>
+
+      <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-4 bg-surface-1">
+        <PanelSection
+          title="Current mission"
+          count={currentTarget ? 1 : 0}
+          open={currentOpen}
+          onToggle={() => setCurrentOpen((v) => !v)}
+          tone="critical"
+        >
+          {currentTarget ? (
+            <div className="border border-border-strong bg-surface-0 p-4 shadow-[3px_3px_0_rgba(26,26,26,1)]">
+              <div className="flex items-start gap-3">
+                <AlertTriangle className="w-4 h-4 text-accent-critical mt-1 flex-shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <h3 className="text-base font-black leading-tight">{currentTarget.title}</h3>
+                      <p className="text-[10px] uppercase font-bold tracking-widest text-text-secondary mt-1">
+                        {currentTarget.kind} · {currentTarget.subtitle}
+                      </p>
+                    </div>
+                    <SeverityChip level={currentTarget.severity} />
+                  </div>
+                  <p className="mt-3 text-sm leading-relaxed text-text-secondary">{currentTarget.description}</p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 mt-4">
+                <MetricBox icon={Clock} label="ETA" value={missionEta} />
+                <MetricBox
+                  icon={MapPin}
+                  label="Location"
+                  value={
+                    currentTarget.type === 'case'
+                      ? activeCase?.name ?? 'Case area'
+                      : `${currentTarget.location.lat.toFixed(4)}, ${currentTarget.location.lng.toFixed(4)}`
+                  }
+                />
+              </div>
+
+              <div className="mt-4 border border-border-strong bg-surface-2 p-3">
+                <div className="text-[9px] uppercase font-black tracking-widest text-text-secondary mb-2">
+                  Live updates
+                </div>
+                {missionUpdates.length > 0 ? (
+                  <div className="flex flex-col gap-1.5">
+                    {missionUpdates.map((line, idx) => (
+                      <p key={idx} className="text-[11px] leading-relaxed">
+                        {line}
+                      </p>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-[11px] text-text-secondary">No mission updates yet. Actions will appear here and in logs.</p>
+                )}
+              </div>
+
+              <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {currentTarget.type === 'sos' ? (
+                  <>
+                    <button
+                      onClick={() => advanceSos(currentTarget.id, 'arrived')}
+                      className="bg-accent-success text-surface-3 border border-border-strong py-2.5 text-[10px] uppercase font-black tracking-widest shadow-[2px_2px_0_rgba(26,26,26,1)]"
+                    >
+                      Mark arrived
+                    </button>
+                    <button
+                      onClick={() => confirmSosSafe(currentTarget.id, 'responder')}
+                      className="bg-surface-3 text-text-inverse border border-border-strong py-2.5 text-[10px] uppercase font-black tracking-widest shadow-[2px_2px_0_rgba(26,26,26,1)]"
+                    >
+                      Completion ack
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button
+                      onClick={() => updateResponderStatus(selfResponderId, self?.status === 'on_scene' ? 'ready' : 'on_scene')}
+                      className="bg-accent-success text-surface-3 border border-border-strong py-2.5 text-[10px] uppercase font-black tracking-widest shadow-[2px_2px_0_rgba(26,26,26,1)]"
+                    >
+                      {self?.status === 'on_scene' ? 'Mark standby' : 'Mark on scene'}
+                    </button>
+                    <button
+                      onClick={() => {
+                        setActiveCaseId(currentTarget.id);
+                        setDrawerContent('case_lobby');
+                      }}
+                      className="bg-surface-3 text-text-inverse border border-border-strong py-2.5 text-[10px] uppercase font-black tracking-widest shadow-[2px_2px_0_rgba(26,26,26,1)]"
+                    >
+                      Open case room
+                    </button>
+                  </>
+                )}
+              </div>
+
+              <div className="mt-4">
+                <label className="block text-[9px] uppercase font-black tracking-widest text-text-secondary mb-1">
+                  Message civilian
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    value={civilianMessage}
+                    onChange={(e) => {
+                      setCivilianMessage(e.target.value);
+                      setSentNotice(null);
+                    }}
+                    placeholder="Send an update to the reporter..."
+                    className="min-w-0 flex-1 border border-border-strong bg-surface-0 px-3 py-2 text-sm outline-none"
+                  />
+                  <button
+                    onClick={sendCivilianMessage}
+                    disabled={!civilianMessage.trim()}
+                    className="px-3 border border-border-strong bg-accent-warning text-text-primary disabled:opacity-50 shadow-[2px_2px_0_rgba(26,26,26,1)]"
+                    title="Send message"
+                  >
+                    <Send className="w-4 h-4" />
+                  </button>
+                </div>
+                <p className="mt-1 text-[9px] uppercase tracking-widest text-text-secondary">
+                  {sentNotice ?? 'Messages are visible to the citizen in notifications and to ops in logs.'}
+                </p>
+              </div>
             </div>
-            <ClipboardList className="w-3 h-3 flex-shrink-0" />
-          </button>
-        ))}
+          ) : (
+            <EmptyPanel icon={CheckCircle} title="No current mission" text="Accept an SOS, join a case, or wait for ops assignment." />
+          )}
+        </PanelSection>
+
+        <PanelSection
+          title="Assignments"
+          count={assignedSos ? activeCases.length + 1 : activeCases.length}
+          open={assignmentsOpen}
+          onToggle={() => setAssignmentsOpen((v) => !v)}
+        >
+          {!assignedSos && activeCases.length === 0 ? (
+            <EmptyPanel icon={CheckCircle} title="No pending assignments" text="Ops-directed and joined missions will appear here." />
+          ) : (
+            <div className="flex flex-col gap-2">
+              {assignedSos && (
+                <AssignmentRow
+                  title={`${assignedSos.id} · ${assignedSos.category}`}
+                  meta={`Citizen ${assignedSos.citizenName} · ${assignedSos.status}`}
+                  severity={4}
+                  actionLabel="Open SOS"
+                  onClick={() => setDrawerContent('assignment_detail')}
+                />
+              )}
+              {activeCases.map((caseRoom) => {
+                const event = events.find((e) => e.caseId === caseRoom.id);
+                return (
+                  <AssignmentRow
+                    key={caseRoom.id}
+                    title={`#${caseRoom.name}`}
+                    meta={`${event?.title ?? 'Ops case'} · ${caseRoom.state} · ${caseRoom.members.length} members`}
+                    severity={caseRoom.severity}
+                    actionLabel="Open room"
+                    onClick={() => {
+                      setActiveCaseId(caseRoom.id);
+                      setDrawerContent('case_lobby');
+                    }}
+                  />
+                );
+              })}
+            </div>
+          )}
+        </PanelSection>
+
+        <PanelSection
+          title="Joinable missions"
+          count={joinableCount}
+          open={joinableOpen}
+          onToggle={() => setJoinableOpen((v) => !v)}
+        >
+          {joinableCount === 0 ? (
+            <EmptyPanel icon={Radio} title="No joinable missions within 8 km" text="Open SOS and ops-formed case rooms will appear here." />
+          ) : (
+            <div className="flex flex-col gap-2">
+              {openSos.slice(0, 2).map(({ item, distanceKm }) => {
+                const fit = fitForSos(self, item.category, distanceKm);
+                return (
+                  <JoinableRow
+                    key={item.id}
+                    title={`${item.id} · ${item.category}`}
+                    meta={`Open SOS · ${distanceKm.toFixed(1)} km · ETA ${etaMinutes(distanceKm)} min`}
+                    severity={4}
+                    fit={fit.score}
+                    fitReason={fit.reason}
+                    actionLabel="Accept SOS"
+                    urgent
+                    onClick={() => {
+                      assignSos(item.id, selfResponderId);
+                      setDrawerContent('assignment_detail');
+                    }}
+                  />
+                );
+              })}
+              {joinableCases.slice(0, 3).map(({ caseRoom, event, distanceKm }) => {
+                const fit = fitForCase(self, caseRoom.severity, event, distanceKm);
+                return (
+                  <JoinableRow
+                    key={caseRoom.id}
+                    title={`${caseRoom.restricted ? 'Official movement · ' : ''}#${caseRoom.name}`}
+                    meta={`${event?.title ?? 'Ops case'} · ${distanceKm.toFixed(1)} km · ${caseRoom.members.length} members`}
+                    severity={caseRoom.severity}
+                    fit={caseRoom.restricted ? 0 : fit.score}
+                    fitReason={caseRoom.restricted ? 'Official-only case. Monitor movement only to avoid interference.' : fit.reason}
+                    actionLabel={caseRoom.restricted ? 'Monitor only' : 'Join case'}
+                    neutral={caseRoom.restricted}
+                    onClick={() => {
+                      if (caseRoom.restricted) {
+                        setActiveCaseId(caseRoom.id);
+                        setDrawerContent('case_lobby');
+                        return;
+                      }
+                      joinCase(caseRoom.id, selfResponderId);
+                      setActiveCaseId(caseRoom.id);
+                      setDrawerContent('case_lobby');
+                    }}
+                  />
+                );
+              })}
+              {joinableCount > 5 && (
+                <button
+                  onClick={() => setDrawerContent('joinable_missions')}
+                  className="w-full border border-border-strong bg-surface-0 py-2 text-[9px] uppercase font-black tracking-widest"
+                >
+                  View all joinable missions
+                </button>
+              )}
+            </div>
+          )}
+        </PanelSection>
       </div>
     </div>
   );
 }
 
+function PanelSection({
+  title,
+  count,
+  open,
+  onToggle,
+  tone = 'neutral',
+  children,
+}: {
+  title: string;
+  count: number;
+  open: boolean;
+  onToggle: () => void;
+  tone?: 'neutral' | 'critical';
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="border border-border-strong bg-surface-0 shadow-[3px_3px_0_rgba(26,26,26,1)]">
+      <button
+        onClick={onToggle}
+        className="w-full px-4 py-3 flex items-center justify-between gap-3 text-left border-b border-border-strong"
+      >
+        <div className="flex items-center gap-2 min-w-0">
+          <span
+            className={`w-2.5 h-2.5 border border-border-strong ${
+              tone === 'critical' && count > 0 ? 'bg-accent-critical' : 'bg-accent-success'
+            }`}
+          />
+          <h3 className="text-sm font-black">{title}</h3>
+          <span
+            className={`min-w-[22px] h-[22px] inline-flex items-center justify-center rounded-full border border-border-strong text-[10px] font-black ${
+              tone === 'critical' && count > 0 ? 'bg-accent-critical text-text-inverse' : 'bg-surface-2'
+            }`}
+          >
+            {count}
+          </span>
+        </div>
+        {open ? <ChevronUp className="w-4 h-4 flex-shrink-0" /> : <ChevronDown className="w-4 h-4 flex-shrink-0" />}
+      </button>
+      {open && <div className="p-3">{children}</div>}
+    </section>
+  );
+}
+
+function MetricBox({
+  icon: Icon,
+  label,
+  value,
+}: {
+  icon: React.ComponentType<{ className?: string }>;
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="border border-border-strong bg-surface-2 p-3 min-w-0">
+      <div className="flex items-center gap-1 text-[9px] uppercase font-black tracking-widest text-text-secondary">
+        <Icon className="w-3 h-3" />
+        {label}
+      </div>
+      <div className="mt-1 text-sm font-black text-text-primary truncate">{value}</div>
+    </div>
+  );
+}
+
+function EmptyPanel({
+  icon: Icon,
+  title,
+  text,
+}: {
+  icon: React.ComponentType<{ className?: string }>;
+  title: string;
+  text: string;
+}) {
+  return (
+    <div className="border border-border-strong bg-surface-2 p-5 flex flex-col items-center justify-center gap-2 text-center min-h-[120px]">
+      <Icon className="w-8 h-8 text-accent-success" />
+      <div className="text-sm font-black">{title}</div>
+      <p className="text-[11px] text-text-secondary leading-relaxed">{text}</p>
+    </div>
+  );
+}
+
+function AssignmentRow({
+  title,
+  meta,
+  severity,
+  actionLabel,
+  onClick,
+}: {
+  key?: React.Key;
+  title: string;
+  meta: string;
+  severity: 1 | 2 | 3 | 4 | 5;
+  actionLabel: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className="w-full border border-border-strong bg-surface-0 p-3 flex items-center gap-3 text-left shadow-[2px_2px_0_rgba(26,26,26,1)] hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none transition-all"
+    >
+      <SeverityChip level={severity} />
+      <div className="flex-1 min-w-0">
+        <div className="text-[11px] uppercase font-black tracking-widest truncate">{title}</div>
+        <div className="text-[9px] uppercase tracking-widest text-text-secondary mt-1 truncate">{meta}</div>
+      </div>
+      <span className="text-[9px] uppercase font-black tracking-widest bg-surface-3 text-text-inverse px-2 py-1 border border-border-strong">
+        {actionLabel}
+      </span>
+    </button>
+  );
+}
+
+function JoinableRow({
+  title,
+  meta,
+  severity,
+  fit,
+  fitReason,
+  actionLabel,
+  onClick,
+  disabled = false,
+  urgent = false,
+  neutral = false,
+}: {
+  key?: React.Key;
+  title: string;
+  meta: string;
+  severity: 1 | 2 | 3 | 4 | 5;
+  fit: number;
+  fitReason: string;
+  actionLabel: string;
+  onClick: () => void;
+  disabled?: boolean;
+  urgent?: boolean;
+  neutral?: boolean;
+}) {
+  return (
+    <div className="border border-border-strong bg-surface-0 p-3 shadow-[2px_2px_0_rgba(26,26,26,1)]">
+      <div className="flex items-start gap-2">
+        <SeverityChip level={severity} />
+        <div className="flex-1 min-w-0">
+          <div className="text-[11px] uppercase font-black tracking-widest truncate">{title}</div>
+          <div className="text-[9px] uppercase tracking-widest text-text-secondary mt-1">{meta}</div>
+        </div>
+      </div>
+      <FitMeter score={fit} reason={fitReason} />
+      <button
+        onClick={onClick}
+        disabled={disabled}
+        className={`mt-2 w-full py-2 text-[9px] uppercase font-black tracking-widest border border-border-strong shadow-[2px_2px_0_rgba(26,26,26,1)] ${
+          disabled
+            ? 'bg-surface-2 text-text-muted cursor-not-allowed'
+            : neutral
+            ? 'bg-surface-2 text-text-primary'
+            : urgent
+            ? 'bg-accent-critical text-text-inverse'
+            : 'bg-accent-success text-surface-3'
+        }`}
+      >
+        {actionLabel}
+      </button>
+    </div>
+  );
+}
+
 export function GroupsWorkspace() {
-  const { groups, joinGroup, leaveGroup, selfResponderId, cases, joinCase, leaveCase } =
+  const { groups, joinGroup, leaveGroup, selfResponderId, cases, joinCase, leaveCase, setActiveCaseId, setDrawerContent } =
     useAppContext();
   return (
     <div className="flex flex-col h-full">
@@ -534,8 +1023,15 @@ export function GroupsWorkspace() {
                 meta={`${c.restricted ? 'official-only · monitor movement' : 'captain ' + c.captain} · ${c.members.length} members`}
                 severity={c.severity}
                 joined={joined}
-                disabled={!!c.restricted}
-                onToggle={() => (joined ? leaveCase(c.id, selfResponderId) : joinCase(c.id, selfResponderId))}
+                restricted={!!c.restricted}
+                onToggle={() => {
+                  if (c.restricted) {
+                    setActiveCaseId(c.id);
+                    setDrawerContent('case_lobby');
+                  } else {
+                    joined ? leaveCase(c.id, selfResponderId) : joinCase(c.id, selfResponderId);
+                  }
+                }}
               />
             );
           })}
@@ -645,6 +1141,7 @@ function Row({
   severity,
   joined,
   disabled = false,
+  restricted = false,
   onToggle,
 }: {
   key?: React.Key;
@@ -654,6 +1151,7 @@ function Row({
   severity?: 1 | 2 | 3 | 4 | 5;
   joined: boolean;
   disabled?: boolean;
+  restricted?: boolean;
   onToggle: () => void;
 }) {
   return (
@@ -671,18 +1169,22 @@ function Row({
         </p>
       </div>
       <button
-        disabled={disabled}
+        disabled={disabled && !restricted}
         onClick={onToggle}
         className={`flex items-center gap-1 px-3 py-1.5 text-[9px] uppercase font-bold tracking-widest border border-border-strong shadow-[2px_2px_0_rgba(26,26,26,1)] hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none transition-all ${
-          disabled
+          disabled && !restricted
             ? 'bg-surface-2 text-text-muted cursor-not-allowed'
+            : restricted
+            ? 'bg-surface-2 text-text-primary'
             : joined
             ? 'bg-accent-critical text-text-inverse'
             : 'bg-accent-success text-surface-3'
         }`}
       >
-        {disabled ? (
+        {restricted ? (
           <>Monitor</>
+        ) : disabled ? (
+          <>Locked</>
         ) : joined ? (
           <>
             <LogOut className="w-3 h-3" />

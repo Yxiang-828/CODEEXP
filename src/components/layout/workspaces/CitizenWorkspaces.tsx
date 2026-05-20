@@ -2,11 +2,21 @@ import { useState } from 'react';
 import type React from 'react';
 import { MapPin, Clock, FileText, Radio, ChevronRight, Camera, Mic, X, CheckCircle2, Bot, Sparkles } from 'lucide-react';
 import { useAppContext } from '../../../AppContext';
-import type { CanonicalEvent, VolunteerEvent } from '../../../AppContext';
+import type {
+  CanonicalEvent,
+  DistressSession,
+  LngLat,
+  NotificationNotice,
+  SelectedMapItem,
+  SourceHealth,
+  TrackingState,
+  VolunteerEvent,
+} from '../../../AppContext';
 import SeverityChip from '../../primitives/SeverityChip';
 import StatusPipeline from '../../primitives/StatusPipeline';
 import { etaMinutes, filterWithinKm, getDistanceKm } from '../../../utils/geo';
 import { askHostAi, type HostAiResponse } from '../../../services/hostAi';
+import type { LiveSnapshot } from '../../../services/live';
 
 export function LocalAlertDetail() {
   const { events, selectedId, setDrawerContent } = useAppContext();
@@ -74,7 +84,7 @@ export function LocalAlertDetail() {
 }
 
 export function IncidentGuidance() {
-  const { setDrawerContent, events, selectedId, selectedMapItem } = useAppContext();
+  const { setDrawerContent, events, selectedId, selectedMapItem, selfLocation, liveTracking, sources, liveSnapshot } = useAppContext();
   const [ai, setAi] = useState<HostAiResponse | null>(null);
   const [loadingAi, setLoadingAi] = useState(false);
   const event = events.find((e) => e.id === selectedId) ?? events[0];
@@ -89,11 +99,16 @@ export function IncidentGuidance() {
       role: 'citizen',
       workspace: 'incident_guidance',
       prompt: `Give citizen-safe guidance for ${event?.title ?? selectedMapItem?.title ?? kind}.`,
-      context: {
+      context: buildCitizenHostContext({
+        events,
+        currentEvent: event,
         kind,
-        title: event?.title ?? selectedMapItem?.title,
-        source: event?.source ?? selectedMapItem?.source,
-      },
+        selfLocation,
+        liveTracking,
+        selectedMapItem,
+        sources,
+        liveSnapshot,
+      }),
     }).catch(() => ({
       state: 'unavailable' as const,
       text: 'Host AI unavailable. Use the safety checklist above.',
@@ -144,7 +159,7 @@ export function IncidentGuidance() {
                   <Bot className="w-3 h-3" />
                   AI suggestion · {ai.state}
                 </strong>
-                {ai.text}
+                <span className="whitespace-pre-line">{ai.text}</span>
               </Card>
             )}
           </>
@@ -579,9 +594,9 @@ export function BriefingSpace() {
 }
 
 export function AlertsState() {
-  const { events, volunteerEvents, sosSessions, responders, setSelectedId, setDrawerContent } =
+  const { events, volunteerEvents, sosSessions, responders, setSelectedId, setDrawerContent, selfLocation } =
     useAppContext();
-  const userLocation = { lng: 103.85, lat: 1.3 };
+  const userLocation = selfLocation ?? { lng: 103.85, lat: 1.3 };
   const activeSos = sosSessions.find((s) => !['resolved', 'cancelled'].includes(s.status));
   const assignedResponder = activeSos?.assignedResponderId
     ? responders.find((r) => r.id === activeSos.assignedResponderId)
@@ -597,7 +612,7 @@ export function AlertsState() {
       <div className="p-4 border-b border-border-strong">
         <h2 className="text-xl font-serif italic font-black">My alerts</h2>
         <p className="text-[10px] uppercase font-bold tracking-widest text-text-secondary">
-          Sorted by distance from demo location · {userLocation.lat.toFixed(3)}N {userLocation.lng.toFixed(3)}E
+          Sorted by proximity · {userLocation.lat.toFixed(3)}°N {userLocation.lng.toFixed(3)}°E
         </p>
       </div>
       <div className="flex-1 overflow-y-auto">
@@ -663,21 +678,40 @@ export function AlertsState() {
 }
 
 export function CitizenAssistant() {
-  const { events, sosSessions, notifications } = useAppContext();
+  const {
+    events,
+    sosSessions,
+    notifications,
+    selfLocation,
+    liveTracking,
+    selectedId,
+    selectedMapItem,
+    tracking,
+    sources,
+    liveSnapshot,
+  } = useAppContext();
   const [prompt, setPrompt] = useState('What should I do near my current alert?');
   const [reply, setReply] = useState<HostAiResponse | null>(null);
   const [loading, setLoading] = useState(false);
+  const currentEvent = selectedId ? events.find((e) => e.id === selectedId) : undefined;
   const ask = async () => {
     setLoading(true);
     const result = await askHostAi({
       role: 'citizen',
       workspace: 'citizen_ai',
       prompt,
-      context: {
-        activeEvents: events.slice(0, 4),
-        activeSos: sosSessions.filter((s) => !['resolved', 'cancelled'].includes(s.status)),
-        notifications: notifications.filter((n) => n.roles.includes('citizen')).slice(0, 4),
-      },
+      context: buildCitizenHostContext({
+        events,
+        sosSessions,
+        notifications,
+        currentEvent,
+        selfLocation,
+        liveTracking,
+        selectedMapItem,
+        tracking,
+        sources,
+        liveSnapshot,
+      }),
     }).catch(() => ({
       state: 'unavailable' as const,
       text: 'Host AI unavailable. Use official instructions and call 995/999 if there is immediate danger.',
@@ -690,7 +724,7 @@ export function CitizenAssistant() {
     <div className="p-5 flex flex-col gap-4">
       <h2 className="text-xl font-serif italic font-black flex items-center gap-2">
         <Bot className="w-4 h-4" />
-        Citizen AI
+        AI Kaki
       </h2>
       <Card>
         Ask for plain-language safety guidance. It loads only when you press ask and must say unavailable instead of inventing live data.
@@ -710,11 +744,166 @@ export function CitizenAssistant() {
       {reply && (
         <Card>
           <strong className="block uppercase tracking-widest text-[9px] mb-1">Host AI · {reply.state}</strong>
-          {reply.text}
+          <span className="whitespace-pre-line">{reply.text}</span>
         </Card>
       )}
     </div>
   );
+}
+
+interface CitizenHostContextInput {
+  events: CanonicalEvent[];
+  sosSessions?: DistressSession[];
+  notifications?: NotificationNotice[];
+  currentEvent?: CanonicalEvent;
+  kind?: CanonicalEvent['kind'];
+  selfLocation: LngLat | null;
+  liveTracking: boolean;
+  selectedMapItem?: SelectedMapItem | null;
+  tracking?: TrackingState | null;
+  sources: SourceHealth[];
+  liveSnapshot: LiveSnapshot | null;
+}
+
+function buildCitizenHostContext({
+  events,
+  sosSessions = [],
+  notifications = [],
+  currentEvent,
+  kind,
+  selfLocation,
+  liveTracking,
+  selectedMapItem,
+  tracking,
+  sources,
+  liveSnapshot,
+}: CitizenHostContextInput) {
+  const userLocation = selfLocation ?? { lng: 103.85, lat: 1.3 };
+  const locationSource = selfLocation ? 'browser_live_gps' : 'fallback_no_gps';
+  const verifiedEvents = events
+    .filter((event) => event.status === 'verified')
+    .map((event) => ({ event, distanceKm: getDistanceKm(userLocation, event.location) }))
+    .sort((a, b) => a.distanceKm - b.distanceKm);
+  const activeSos = sosSessions.filter((s) => !['resolved', 'cancelled'].includes(s.status));
+  const currentAlert =
+    currentEvent
+      ? eventForHost(currentEvent, getDistanceKm(userLocation, currentEvent.location))
+      : selectedMapItem
+      ? {
+          id: selectedMapItem.id,
+          kind: kind ?? selectedMapItem.category.toLowerCase(),
+          title: selectedMapItem.title,
+          source: selectedMapItem.source,
+          detail: selectedMapItem.detail,
+          location: { lng: selectedMapItem.lng, lat: selectedMapItem.lat },
+          distanceKm: roundKm(getDistanceKm(userLocation, { lng: selectedMapItem.lng, lat: selectedMapItem.lat })),
+          liveValue: 'unavailable unless stated in detail',
+        }
+      : verifiedEvents[0]
+      ? eventForHost(verifiedEvents[0].event, verifiedEvents[0].distanceKm)
+      : null;
+  const nearestRainfall = liveSnapshot?.rainfall
+    .map((station) => ({ station, distanceKm: getDistanceKm(userLocation, station) }))
+    .sort((a, b) => a.distanceKm - b.distanceKm)[0];
+  const nearestForecast = liveSnapshot?.forecast
+    .map((forecast) => ({ forecast, distanceKm: getDistanceKm(userLocation, forecast) }))
+    .sort((a, b) => a.distanceKm - b.distanceKm)[0];
+
+  return {
+    userStatus: {
+      role: 'citizen',
+      location: {
+        lng: Number(userLocation.lng.toFixed(5)),
+        lat: Number(userLocation.lat.toFixed(5)),
+        source: locationSource,
+        liveTracking: liveTracking ? 'on' : 'off',
+        accuracyNote: selfLocation ? 'actual browser GPS from this device' : 'fallback only; real user location unavailable',
+      },
+      activeSos: activeSos[0]
+        ? {
+            id: activeSos[0].id,
+            category: activeSos[0].category,
+            status: activeSos[0].status,
+            assignedResponderId: activeSos[0].assignedResponderId ?? 'unassigned',
+          }
+        : 'none',
+      trackingPill: tracking
+        ? { kind: tracking.kind, title: tracking.title, eta: tracking.eta, tone: tracking.tone ?? 'neutral' }
+        : 'none',
+    },
+    currentAlert,
+    nearbyAlerts: verifiedEvents.slice(0, 5).map(({ event, distanceKm }) => eventForHost(event, distanceKm)),
+    citizenNotifications: notifications
+      .filter((n) => n.roles.includes('citizen'))
+      .slice(0, 4)
+      .map((n) => ({ tier: n.tier, title: n.title, body: n.body })),
+    liveSources: sources.map((s) => ({
+      name: s.name,
+      state: s.state,
+      ageSeconds: s.lastAgeS,
+      note: s.note ?? '',
+    })),
+    weatherSnapshot: liveSnapshot
+      ? {
+          fetchedAgeSeconds: Math.max(0, Math.round((Date.now() - liveSnapshot.fetchedAt) / 1000)),
+          psiNational: liveSnapshot.psi.find((p) => p.region === 'national')?.psi24h ?? 'unavailable',
+          nearestRainfall: nearestRainfall
+            ? {
+                station: nearestRainfall.station.name,
+                mm: nearestRainfall.station.mm,
+                distanceKm: roundKm(nearestRainfall.distanceKm),
+              }
+            : 'unavailable',
+          nearestForecast: nearestForecast
+            ? {
+                area: nearestForecast.forecast.area,
+                forecast: nearestForecast.forecast.forecast,
+                distanceKm: roundKm(nearestForecast.distanceKm),
+              }
+            : 'unavailable',
+        }
+      : 'unavailable',
+    availableTools: [
+      {
+        name: '/api/host/ask',
+        mode: 'OpenRouter text guidance only',
+        limit: 'called only after the user presses Ask; prompt max 1600 chars; context max 4800 chars; no hidden live lookup',
+      },
+      {
+        name: '/api/live/map-layers',
+        mode: 'server live-data adapter for map overlays',
+        limit: 'OneMap hospitals/AED themes and LTA incidents/speed bands only when production env keys exist; frontend caps AED to 400 and traffic to 120 markers',
+      },
+      {
+        name: 'client_app_state',
+        mode: 'current in-app state packet',
+        limit: 'nearby verified alerts max 5, citizen notifications max 4, active SOS summary only',
+      },
+    ],
+    answerContract: 'Do not list every alert by default. Give immediate citizen action for the current/nearest alert, mention unavailable live values explicitly, and avoid markdown tables.',
+  };
+}
+
+function eventForHost(event: CanonicalEvent, distanceKm: number) {
+  return {
+    id: event.id,
+    kind: event.kind,
+    title: event.title,
+    severity: `L${event.severity}`,
+    status: event.status,
+    source: event.source,
+    location: {
+      lng: Number(event.location.lng.toFixed(5)),
+      lat: Number(event.location.lat.toFixed(5)),
+    },
+    distanceKm: roundKm(distanceKm),
+    liveValue: event.liveValue ?? 'unavailable',
+    caseId: event.caseId ?? 'none',
+  };
+}
+
+function roundKm(value: number) {
+  return Number(value.toFixed(2));
 }
 
 function EmptyRow({ children }: { children: React.ReactNode }) {

@@ -26,6 +26,7 @@ import {
   TriangleAlert,
   CloudRain,
   CircleHelp,
+  ShieldCheck,
 } from 'lucide-react';
 import CoveragePreview from '../primitives/CoveragePreview';
 import { severityPinSize } from '../primitives/SeverityChip';
@@ -38,6 +39,47 @@ const ONEMAP_DEFAULT = 'https://www.onemap.gov.sg/maps/tiles/Default/{z}/{x}/{y}
 
 const SG_CENTER: [number, number] = [103.8198, 1.3521];
 const POI_LABEL_ZOOM = 15.5;
+const SEVERITY_COLORS = {
+  1: '#D1D5DB',
+  2: '#60A5FA',
+  3: '#FACC15',
+  4: '#F97316',
+  5: '#DC2626',
+} as const;
+const RESOURCE_COLORS = {
+  hospital: '#0EA5E9',
+  aed: '#10B981',
+  responder: '#1A1A1A',
+  official: '#2563EB',
+  self: '#2563EB',
+  route: '#7C3AED',
+} as const;
+const TRANSPORT_COLORS = {
+  ok: '#22C55E',
+  warning: '#F59E0B',
+  critical: '#DC2626',
+} as const;
+
+const RESOURCE_LEGEND = [
+  { label: 'AED', detail: 'rescue item', color: RESOURCE_COLORS.aed, icon: Zap },
+  { label: 'Hospital', detail: 'care site', color: RESOURCE_COLORS.hospital, icon: Hospital },
+  { label: 'Responder', detail: 'volunteer unit', color: RESOURCE_COLORS.responder, icon: Radio },
+  { label: 'Official', detail: 'SCDF/SPF/SAF', color: RESOURCE_COLORS.official, icon: ShieldCheck },
+];
+
+const SEVERITY_LEGEND = [
+  { level: 1, label: 'Advisory', size: 14 },
+  { level: 2, label: 'Notice', size: 18 },
+  { level: 3, label: 'Warning', size: 22 },
+  { level: 4, label: 'Severe', size: 26 },
+  { level: 5, label: 'Emergency', size: 30 },
+] as const;
+
+const TRANSPORT_LEGEND = [
+  { label: 'OK', color: TRANSPORT_COLORS.ok },
+  { label: 'Slow', color: TRANSPORT_COLORS.warning },
+  { label: 'Crash', color: TRANSPORT_COLORS.critical },
+] as const;
 
 const DEMO_HOSPITAL_POIS: MapPoi[] = [
   { id: 'H-SGH', name: 'SGH', detail: 'Hospital · demo fallback', lng: 103.8359, lat: 1.2806, source: 'demo' },
@@ -94,6 +136,7 @@ export default function MapCanvas() {
   const markerStore = useRef<Marker[]>([]);
   const hoverPopupStore = useRef<Popup[]>([]);
   const polygonSourceIds = useRef<string[]>([]);
+  const selfMarkerRef = useRef<Marker | null>(null);
 
   const {
     role,
@@ -105,17 +148,21 @@ export default function MapCanvas() {
     setSelectedId,
     setDrawerContent,
     setSelectedMapItem,
+    selfLocation,
+    draftPolygon,
+    setDraftPolygon,
   } = useAppContext();
 
+  const [mapReady, setMapReady] = useState(false);
   const [drawMode, setDrawMode] = useState<
     'select' | 'point' | 'polygon' | 'rect' | 'circle' | 'freehand' | 'erase'
   >('select');
   const [snap, setSnap] = useState(true);
   const [acceptedPartialCells, setAcceptedPartialCells] = useState(false);
-  const [draftPolygon, setDraftPolygon] = useState<LngLat[]>([]);
   const [liveLayers, setLiveLayers] = useState<LiveMapLayers | null>(null);
   const [layerStatus, setLayerStatus] = useState<'loading' | 'live' | 'demo' | 'partial'>('loading');
   const [showLabels, setShowLabels] = useState(true);
+  const [markerOpacity, setMarkerOpacity] = useState(1);
   const [visibleLayers, setVisibleLayers] = useState({
     disaster: true,
     hospital: true,
@@ -165,7 +212,7 @@ export default function MapCanvas() {
     ? [...liveLayers.traffic, ...liveLayers.speedBands].slice(0, 120)
     : DEMO_TRAFFIC_POIS;
   const mrtStatus = liveLayers?.mrt.length ? liveLayers.mrt : MRT_STATUS;
-  const aedPois = allAedPois.slice(0, 80);
+  const aedPois = allAedPois.slice(0, 400);
   const trafficPois = allTrafficPois.slice(0, 120);
 
   useEffect(() => {
@@ -173,6 +220,45 @@ export default function MapCanvas() {
     setDrawMode('select');
     setDraftPolygon([]);
   }, [drawingSession]);
+
+  // ---- self-location marker ----
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady) return;
+    if (!selfLocation) {
+      selfMarkerRef.current?.remove();
+      selfMarkerRef.current = null;
+      return;
+    }
+    if (!selfMarkerRef.current) {
+      const el = document.createElement('div');
+      el.setAttribute('aria-label', 'Your location');
+      el.style.cssText = [
+        'width:18px', 'height:18px', 'border-radius:50%',
+        `background:${RESOURCE_COLORS.self}`, 'border:3px solid #fff',
+        `box-shadow:0 0 0 2px ${RESOURCE_COLORS.self}`,
+        'position:relative', 'cursor:default',
+      ].join(';');
+      const ring = document.createElement('div');
+      ring.style.cssText = [
+        'position:absolute', 'inset:-6px', 'border-radius:50%',
+        `border:2px solid ${RESOURCE_COLORS.self}`, 'opacity:0.5',
+        'animation:selfping 1.8s cubic-bezier(0,0,0.2,1) infinite',
+      ].join(';');
+      if (!document.getElementById('kk-self-ping-style')) {
+        const s = document.createElement('style');
+        s.id = 'kk-self-ping-style';
+        s.textContent = '@keyframes selfping{0%{transform:scale(.8);opacity:.8}100%{transform:scale(2.2);opacity:0}}';
+        document.head.appendChild(s);
+      }
+      el.appendChild(ring);
+      selfMarkerRef.current = new maplibregl.Marker({ element: el, anchor: 'center' })
+        .setLngLat([selfLocation.lng, selfLocation.lat])
+        .addTo(map);
+    } else {
+      selfMarkerRef.current.setLngLat([selfLocation.lng, selfLocation.lat]);
+    }
+  }, [selfLocation, mapReady]);
 
   // ---- map init ----
   useEffect(() => {
@@ -221,11 +307,11 @@ export default function MapCanvas() {
           'fill-color': [
             'match',
             ['get', 'sev'],
-            1, '#1A1A1A',
-            2, '#60A5FA',
-            3, '#FEF08A',
-            4, '#EF4444',
-            5, '#EF4444',
+            1, SEVERITY_COLORS[1],
+            2, SEVERITY_COLORS[2],
+            3, SEVERITY_COLORS[3],
+            4, SEVERITY_COLORS[4],
+            5, SEVERITY_COLORS[5],
             '#1A1A1A',
           ],
           'fill-opacity': 0.18,
@@ -239,11 +325,11 @@ export default function MapCanvas() {
           'line-color': [
             'match',
             ['get', 'sev'],
-            1, '#1A1A1A',
-            2, '#60A5FA',
-            3, '#FEF08A',
-            4, '#EF4444',
-            5, '#EF4444',
+            1, SEVERITY_COLORS[1],
+            2, SEVERITY_COLORS[2],
+            3, SEVERITY_COLORS[3],
+            4, SEVERITY_COLORS[4],
+            5, SEVERITY_COLORS[5],
             '#1A1A1A',
           ],
           'line-width': 2,
@@ -260,10 +346,28 @@ export default function MapCanvas() {
         type: 'circle',
         source: 'case-halos',
         paint: {
-          'circle-color': '#EF4444',
-          'circle-opacity': 0.1,
-          'circle-radius': 50,
-          'circle-stroke-color': '#EF4444',
+          'circle-color': [
+            'match',
+            ['get', 'sev'],
+            1, SEVERITY_COLORS[1],
+            2, SEVERITY_COLORS[2],
+            3, SEVERITY_COLORS[3],
+            4, SEVERITY_COLORS[4],
+            5, SEVERITY_COLORS[5],
+            SEVERITY_COLORS[4],
+          ],
+          'circle-opacity': 0.12,
+          'circle-radius': ['interpolate', ['linear'], ['get', 'sev'], 1, 28, 5, 68],
+          'circle-stroke-color': [
+            'match',
+            ['get', 'sev'],
+            1, '#6B7280',
+            2, SEVERITY_COLORS[2],
+            3, SEVERITY_COLORS[3],
+            4, SEVERITY_COLORS[4],
+            5, SEVERITY_COLORS[5],
+            SEVERITY_COLORS[4],
+          ],
           'circle-stroke-width': 2,
           'circle-stroke-opacity': 0.7,
         },
@@ -278,7 +382,7 @@ export default function MapCanvas() {
         type: 'line',
         source: 'responder-routes',
         paint: {
-          'line-color': '#EF4444',
+          'line-color': RESOURCE_COLORS.route,
           'line-width': 2.5,
           'line-dasharray': [3, 2],
         },
@@ -296,9 +400,9 @@ export default function MapCanvas() {
           'line-color': [
             'match',
             ['get', 'tone'],
-            'warning', '#FEF08A',
-            'critical', '#EF4444',
-            'ok', '#4ADE80',
+            'warning', TRANSPORT_COLORS.warning,
+            'critical', TRANSPORT_COLORS.critical,
+            'ok', TRANSPORT_COLORS.ok,
             '#1A1A1A',
           ],
           'line-width': 4,
@@ -323,6 +427,7 @@ export default function MapCanvas() {
         source: 'draft',
         paint: { 'line-color': '#60A5FA', 'line-width': 2 },
       });
+      setMapReady(true);
     });
 
     map.on('zoom', () => {
@@ -486,7 +591,7 @@ export default function MapCanvas() {
         el.onclick = (ev) => {
           ev.stopPropagation();
           setSelectedId(e.id);
-          setDrawerContent(role === 'ops' ? 'incident_ops' : 'local_alert');
+          setDrawerContent(role === 'ops' ? 'dispatch' : 'local_alert');
         };
         const marker = new maplibregl.Marker({ element: el })
           .setLngLat([e.location.lng, e.location.lat])
@@ -497,7 +602,7 @@ export default function MapCanvas() {
       for (const s of visibleSos) {
         const el = document.createElement('button');
         el.className =
-          'sos-pin w-8 h-8 -ml-4 -mt-4 flex items-center justify-center border-2 border-black bg-red-500 text-white shadow-[3px_3px_0_#000] hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none transition-all cursor-pointer';
+          'sos-pin w-8 h-8 -ml-4 -mt-4 flex items-center justify-center border-2 border-black bg-red-600 text-white ring-4 ring-red-200 shadow-[3px_3px_0_#000] hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none transition-all cursor-pointer';
         el.style.borderRadius = '0';
         el.title = `${s.id} · ${s.category} · ${s.status}`;
         el.innerHTML = `<span style="font-size:10px;font-weight:900;font-family:ui-monospace">SOS</span>`;
@@ -655,6 +760,12 @@ export default function MapCanvas() {
     labelsRef.current = showLabels;
   }, [showLabels]);
 
+  useEffect(() => {
+    if (containerRef.current) {
+      containerRef.current.style.setProperty('--kk-poi-opacity', String(markerOpacity));
+    }
+  }, [markerOpacity]);
+
   const drawCellCount = Math.max(1, Math.floor(draftPolygon.length * 1.6));
   useEffect(() => {
     setAcceptedPartialCells(false);
@@ -694,7 +805,22 @@ export default function MapCanvas() {
         >
           Labels {showLabels ? 'on' : 'off'}
         </button>
+        <div className="flex items-center gap-1">
+          <span className="text-[8px] font-black uppercase tracking-widest whitespace-nowrap">α</span>
+          <input
+            type="range"
+            min={0.15}
+            max={1}
+            step={0.05}
+            value={markerOpacity}
+            onChange={(e) => setMarkerOpacity(Number(e.target.value))}
+            className="w-16 accent-black h-1 cursor-pointer"
+            title={`Marker opacity ${Math.round(markerOpacity * 100)}%`}
+          />
+        </div>
       </div>
+
+      <MapLegend />
 
       {/* drawing toolbar (ops only) */}
       {drawingSession && (
@@ -732,6 +858,99 @@ export default function MapCanvas() {
         >
           Continue
         </button>
+      )}
+    </div>
+  );
+}
+
+function MapLegend() {
+  const [open, setOpen] = useState(false);
+  return (
+    <div
+      className={`absolute top-[104px] right-2 sm:top-3 sm:right-3 z-10 bg-white border border-black shadow-[4px_4px_0_#000] text-black ${
+        open ? 'w-[184px] sm:w-[260px]' : 'w-auto'
+      }`}
+    >
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-controls="map-legend-body"
+        title={open ? 'Hide map legend' : 'Show map legend'}
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center justify-between gap-2 px-2 py-1.5 bg-black text-white text-[9px] font-black uppercase tracking-widest cursor-pointer hover:bg-gray-800"
+      >
+        <span>{open ? 'Hide legend' : 'Legend'}</span>
+        <span className="text-[10px] leading-none">{open ? '▲' : '▼'}</span>
+      </button>
+      {open && (
+        <div id="map-legend-body" className="max-h-[calc(100vh-220px)] overflow-y-auto">
+      <div className="p-2 border-b border-black">
+        <div className="text-[8px] uppercase font-black tracking-widest text-gray-600 mb-1">
+          Supplies / rescue
+        </div>
+        <div className="grid grid-cols-2 gap-1">
+          {RESOURCE_LEGEND.map(({ label, detail, color, icon: Icon }) => (
+            <div key={label} className="flex items-center gap-1.5 min-w-0">
+              <span
+                className="w-6 h-6 border border-black flex items-center justify-center shrink-0"
+                style={{ backgroundColor: color, color: '#F4F4F1' }}
+              >
+                <Icon className="w-3.5 h-3.5" strokeWidth={3} />
+              </span>
+              <span className="min-w-0">
+                <strong className="block text-[8px] uppercase font-black tracking-widest leading-none truncate">
+                  {label}
+                </strong>
+                <em className="block text-[8px] not-italic uppercase tracking-widest text-gray-600 leading-tight truncate">
+                  {detail}
+                </em>
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+      <div className="p-2">
+        <div className="text-[8px] uppercase font-black tracking-widest text-gray-600 mb-1">
+          Incidents / events
+        </div>
+        <div className="flex items-end justify-between gap-1">
+          {SEVERITY_LEGEND.map((item) => (
+            <div key={item.level} className="flex flex-col items-center gap-1 min-w-0">
+              <span
+                className="block border-2 border-black shadow-[1px_1px_0_#000]"
+                style={{
+                  width: item.size,
+                  height: item.size,
+                  backgroundColor: SEVERITY_COLORS[item.level],
+                }}
+              />
+              <span className="text-[8px] font-mono font-black leading-none">L{item.level}</span>
+            </div>
+          ))}
+        </div>
+        <div className="mt-1 grid grid-cols-2 gap-x-2 gap-y-0.5">
+          {SEVERITY_LEGEND.map((item) => (
+            <div key={item.label} className="text-[8px] uppercase tracking-widest text-gray-700 truncate">
+              L{item.level} {item.label}
+            </div>
+          ))}
+        </div>
+        <div className="mt-2 pt-1 border-t border-black/30 flex items-center gap-1">
+          <TrafficCone className="w-3 h-3 shrink-0" />
+          <div className="flex flex-1 gap-1">
+            {TRANSPORT_LEGEND.map((item) => (
+              <span
+                key={item.label}
+                className="flex-1 px-1 py-0.5 border border-black text-center text-[7px] font-black uppercase tracking-widest"
+                style={{ backgroundColor: item.color, color: item.label === 'Crash' ? '#F4F4F1' : '#1A1A1A' }}
+              >
+                {item.label}
+              </span>
+            ))}
+          </div>
+        </div>
+      </div>
+        </div>
       )}
     </div>
   );
@@ -843,13 +1062,15 @@ function pinClass(sev: number) {
   const base =
     'event-pin flex items-center justify-center border-2 border-black shadow-[3px_3px_0_#000] hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none transition-all cursor-pointer';
   const tone =
-    sev >= 4
-      ? 'bg-red-500 text-white'
-      : sev === 3
-      ? 'bg-yellow-200 text-black'
+    sev >= 5
+      ? 'bg-red-600 text-white ring-4 ring-red-200'
+      : sev === 4
+      ? 'bg-orange-500 text-black'
+        : sev === 3
+      ? 'bg-amber-300 text-black'
       : sev === 2
-      ? 'bg-blue-400 text-white'
-      : 'bg-white text-black';
+      ? 'bg-sky-400 text-black'
+      : 'bg-gray-300 text-black';
   return base + ' ' + tone;
 }
 

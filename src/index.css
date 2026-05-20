@@ -85,6 +85,8 @@ body {
   box-shadow: 3px 3px 0 #1A1A1A;
   cursor: pointer;
   text-align: left;
+  opacity: var(--kk-poi-opacity, 1);
+  transition: opacity 0.15s;
 }
 
 .qa-poi-marker > span {
@@ -107,18 +109,35 @@ body {
   box-shadow: none;
 }
 
+.event-pin {
+  opacity: var(--kk-poi-opacity, 1);
+  transition: opacity 0.15s;
+}
+
+.sos-pin {
+  opacity: var(--kk-poi-opacity, 1);
+  transition: opacity 0.15s;
+}
+
+.responder-pin {
+  opacity: var(--kk-poi-opacity, 1);
+  transition: opacity 0.15s;
+}
+
 .qa-poi-compact {
   display: flex;
-  width: 36px;
-  height: 32px;
-  padding: 3px;
+  width: 22px;
+  height: 22px;
+  padding: 2px;
   align-items: center;
   justify-content: center;
+  border-width: 1px;
+  box-shadow: 2px 2px 0 #1A1A1A;
 }
 
 .qa-poi-compact > span {
-  width: 28px;
-  height: 24px;
+  width: 16px;
+  height: 16px;
 }
 
 .qa-poi-compact em,
@@ -126,22 +145,28 @@ body {
   display: none;
 }
 
-.qa-poi-hospital > span,
+.qa-poi-hospital > span {
+  background: #0EA5E9;
+  color: #F4F4F1;
+}
+
 .qa-poi-aed > span {
-  background: #EF4444;
+  background: #10B981;
+  color: #F4F4F1;
 }
 
 .qa-poi-warning > span {
-  background: #FEF08A;
+  background: #F59E0B;
   color: #1A1A1A;
 }
 
 .qa-poi-critical > span {
-  background: #EF4444;
+  background: #DC2626;
+  color: #F4F4F1;
 }
 
 .qa-poi-ok > span {
-  background: #4ADE80;
+  background: #22C55E;
   color: #1A1A1A;
 }
 

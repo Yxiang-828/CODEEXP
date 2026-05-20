@@ -14,10 +14,10 @@ import {
 import type { SeverityLevel } from './components/primitives/SeverityChip';
 import { fetchLiveSnapshot, type LiveSnapshot } from './services/live';
 import { askHostAi } from './services/hostAi';
+import { api, connectWs } from './services/backendClient';
 
 export type Role = 'citizen' | 'responder' | 'ops';
 export type ShellState = 'S0' | 'S2' | 'S4' | 'S6' | 'S9';
-export type DemoScenario = 'medical_sos' | 'flood_zone' | 'traffic_case' | 'volunteer_drive';
 
 export interface LngLat {
   lng: number;
@@ -266,6 +266,7 @@ interface AppState {
   briefingInView: number;
   selfResponderId: string;
 
+  pushNotification: (entry: Omit<NotificationNotice, 'id' | 'createdAt' | 'ackBy'>) => void;
   fileReport: (r: Omit<CitizenReport, 'id' | 'status' | 'createdAt' | 'reporterTrust'>) => string;
   claimReport: (id: string, by: string) => void;
   verifyReport: (id: string) => void;
@@ -276,8 +277,10 @@ interface AppState {
   advanceSos: (sosId: string, to: DistressSession['status']) => void;
   confirmSosSafe: (sosId: string, by: 'citizen' | 'responder') => void;
   cancelSos: (sosId: string) => void;
+  messageCitizen: (targetId: string, responderId: string, text: string) => void;
 
   declareIncident: (e: Omit<CanonicalEvent, 'id' | 'createdAt' | 'status'>) => string;
+  resolveEvent: (eventId: string) => void;
   declareZone: (z: Omit<EmergencyZone, 'id' | 'createdAt' | 'status'>) => string;
   updateZoneStatus: (zoneId: string, status: EmergencyZone['status']) => void;
   assignIncident: (eventId: string, responderId: string) => void;
@@ -299,493 +302,74 @@ interface AppState {
   requestCaseFormation: (eventId: string, responderId: string) => void;
   closeCase: (caseId: string, finalReport: string) => void;
   ackNotification: (notificationId: string, actorId: string) => void;
-  runDemoScenario: (scenario: DemoScenario) => void;
+
+  selfLocation: LngLat | null;
+  setSelfLocation: (loc: LngLat | null) => void;
+  liveTracking: boolean;
+  setLiveTracking: (on: boolean) => void;
+  updateResponderLocation: (responderId: string, loc: LngLat) => void;
+  draftPolygon: LngLat[];
+  setDraftPolygon: (pts: LngLat[]) => void;
 }
 
 const AppContext = createContext<AppState | undefined>(undefined);
 
-const NOW = Date.now();
-const T = (mins: number) => NOW - mins * 60_000;
 const SELF_ID = 'R-ECHO-1';
 
-// Seed locations are real SG coords
 const seed = {
   groups: [
-    {
-      id: 'G-SCDF-EAST',
-      name: 'SCDF · East District',
-      org: 'SCDF',
-      kind: 'org',
-      members: ['R-BRAVO-9', 'R-DELTA-1', 'R-SCDF-HAZMAT'],
-      description: 'Singapore Civil Defence Force, Eastern operational district.',
-    },
-    {
-      id: 'G-MEDIC-VOL',
-      name: 'Medic Volunteers',
-      org: 'Volunteer',
-      kind: 'capability',
-      members: ['R-ECHO-1'],
-      description: 'Trained first-aid volunteer cadre, island-wide.',
-    },
-    {
-      id: 'G-AED-RESP',
-      name: 'AED Responders',
-      org: 'Volunteer',
-      kind: 'capability',
-      members: [],
-      description: 'Citizens trained on automated external defibrillators. SCDF myResponder programme.',
-    },
-    {
-      id: 'G-BEDOK',
-      name: 'Bedok Cell · gh5 w21z2',
-      org: 'Geo',
-      kind: 'geo',
-      members: [],
-      description: 'All responders active in the Bedok geohash cell.',
-    },
-    {
-      id: 'G-FIRE-VOL',
-      name: 'Fire Auxiliary',
-      org: 'Volunteer',
-      kind: 'capability',
-      members: ['R-CHARLIE-3'],
-      description: 'Auxiliary fire-trained responders for SCDF augmentation.',
-    },
-    {
-      id: 'G-LANG-TA',
-      name: 'Tamil-speaking Aux',
-      org: 'Community',
-      kind: 'community',
-      members: [],
-      description: 'Translation help during multi-language incidents.',
-    },
+    { id: 'G-SCDF-EAST', name: 'SCDF · East District', org: 'SCDF', kind: 'org', members: [], description: 'Singapore Civil Defence Force, Eastern operational district.' },
+    { id: 'G-MEDIC-VOL', name: 'Medic Volunteers', org: 'Volunteer', kind: 'capability', members: [], description: 'Trained first-aid volunteer cadre, island-wide.' },
+    { id: 'G-AED-RESP', name: 'AED Responders', org: 'Volunteer', kind: 'capability', members: [], description: 'Citizens trained on AEDs. SCDF myResponder programme.' },
+    { id: 'G-FIRE-VOL', name: 'Fire Auxiliary', org: 'Volunteer', kind: 'capability', members: [], description: 'Auxiliary fire-trained responders for SCDF augmentation.' },
   ] as Group[],
 
-  events: [
-    {
-      id: 'EV-1001',
-      kind: 'flood',
-      title: 'Heavy flooding at Bedok South Rd',
-      severity: 3 as SeverityLevel,
-      status: 'verified',
-      location: { lng: 103.93, lat: 1.32 },
-      area: [
-        { lng: 103.918, lat: 1.318 },
-        { lng: 103.942, lat: 1.318 },
-        { lng: 103.942, lat: 1.328 },
-        { lng: 103.918, lat: 1.328 },
-      ],
-      source: 'SCDF + 4 corroborating reports',
-      createdAt: T(22),
-    },
-    {
-      id: 'EV-1002',
-      kind: 'crash',
-      title: 'Multi-vehicle collision on AYE',
-      severity: 4 as SeverityLevel,
-      status: 'verified',
-      location: { lng: 103.79, lat: 1.28 },
-      source: 'SCDF dispatch',
-      createdAt: T(8),
-      caseId: 'CASE-ALPHA-09',
-    },
-    {
-      id: 'EV-1003',
-      kind: 'hazard',
-      title: 'Fallen tree blocking lane · Tampines Ave 4',
-      severity: 1 as SeverityLevel,
-      status: 'verified',
-      location: { lng: 103.94, lat: 1.35 },
-      source: 'OneMap traffic',
-      createdAt: T(46),
-    },
-  ] as CanonicalEvent[],
-
-  reports: [
-    {
-      id: 'REP-4921',
-      kind: 'fire',
-      title: 'Smoke from residential block · Toa Payoh',
-      body: 'Heavy white smoke from upper floor, Blk 215.',
-      location: { lng: 103.85, lat: 1.335 },
-      reporterTrust: 0.72,
-      status: 'pending',
-      createdAt: T(1),
-    },
-    {
-      id: 'REP-4920',
-      kind: 'medical',
-      title: 'Citizen collapsed · City Hall MRT',
-      body: 'Elderly man collapsed near exit B.',
-      location: { lng: 103.853, lat: 1.293 },
-      reporterTrust: 0.65,
-      status: 'pending',
-      createdAt: T(5),
-    },
-  ] as CitizenReport[],
-
-  sosSessions: [
-    {
-      id: 'SOS-029',
-      citizenName: 'U_7821',
-      category: 'medical',
-      location: { lng: 103.742, lat: 1.333 }, // Jurong East MRT
-      status: 'requesting',
-      startedAt: T(0.5),
-    },
-  ] as DistressSession[],
+  events: [] as CanonicalEvent[],
+  reports: [] as CitizenReport[],
+  sosSessions: [] as DistressSession[],
 
   responders: [
     {
-      id: 'R-BRAVO-9',
-      name: 'Bravo-9',
-      org: 'SCDF',
-      role: 'medic',
-      status: 'on_scene',
-      location: { lng: 103.792, lat: 1.282 },
-      groups: ['G-SCDF-EAST'],
-      unitType: 'professional',
-      demo: true,
-      note: 'Demo SCDF professional unit. Volunteers can see movement but cannot join official-only case work.',
-    },
-    {
-      id: 'R-CHARLIE-3',
-      name: 'Charlie-3',
-      org: 'Volunteer',
-      role: 'fire',
-      status: 'on_scene',
-      location: { lng: 103.788, lat: 1.278 },
-      groups: ['G-FIRE-VOL'],
-      unitType: 'volunteer',
-    },
-    {
-      id: 'R-ECHO-1',
+      id: SELF_ID,
       name: 'Echo-1',
       org: 'Volunteer',
       role: 'medic',
       status: 'ready',
       location: { lng: 103.85, lat: 1.3 },
-      groups: ['G-MEDIC-VOL'],
+      groups: [],
       unitType: 'volunteer',
-    },
-    {
-      id: 'R-DELTA-1',
-      name: 'Delta-1',
-      org: 'SCDF',
-      role: 'medic',
-      status: 'ready',
-      location: { lng: 103.83, lat: 1.305 },
-      groups: ['G-SCDF-EAST'],
-      unitType: 'professional',
-      demo: true,
-      note: 'Demo SCDF ambulance responder.',
-    },
-    {
-      id: 'R-SPF-12',
-      name: 'SPF Patrol-12',
-      org: 'SPF',
-      role: 'aux',
-      status: 'en_route',
-      location: { lng: 103.847, lat: 1.305 },
-      groups: [],
-      unitType: 'professional',
-      demo: true,
-      covert: true,
-      note: 'Demo SPF movement. Covert label is hidden from volunteer case labels.',
-    },
-    {
-      id: 'R-SAF-ENG-6',
-      name: 'SAF Eng-6',
-      org: 'SAF',
-      role: 'search',
-      status: 'ready',
-      location: { lng: 103.909, lat: 1.318 },
-      groups: [],
-      unitType: 'professional',
-      demo: true,
-      note: 'Demo SAF engineer support unit for flood/structural incidents.',
-    },
-    {
-      id: 'R-SCDF-HAZMAT',
-      name: 'SCDF HazMat-3',
-      org: 'SCDF',
-      role: 'fire',
-      status: 'ready',
-      location: { lng: 103.864, lat: 1.336 },
-      groups: ['G-SCDF-EAST'],
-      unitType: 'professional',
-      demo: true,
-      note: 'Demo SCDF hazmat/fire unit.',
     },
   ] as Responder[],
 
   users: [
-    {
-      id: 'U-CIV-1',
-      username: 'maya',
-      displayName: 'Maya Tan',
-      phone: '+65 8123 4567',
-      primaryRole: 'citizen',
-      address: 'Bedok North, Singapore',
-      skills: ['Community reporting'],
-      available: true,
-    },
-    {
-      id: SELF_ID,
-      username: 'echo1',
-      displayName: 'Echo-1 Responder',
-      phone: '+65 8450 1101',
-      primaryRole: 'responder',
-      secondaryRole: 'citizen',
-      address: 'Central Singapore',
-      skills: ['First Aid', 'CPR', 'AED', 'Search'],
-      available: true,
-    },
-    {
-      id: 'U-OPS-1',
-      username: 'opslead',
-      displayName: 'Ops Lead',
-      phone: '+65 9000 0001',
-      primaryRole: 'ops',
-      secondaryRole: 'citizen',
-      address: 'HQ Operations',
-      skills: ['Dispatch', 'Incident command'],
-      available: true,
-    },
+    { id: 'U-CIV-1', username: 'citizen', displayName: 'Citizen', phone: '', primaryRole: 'citizen', address: '', skills: [], available: true },
+    { id: SELF_ID, username: 'echo1', displayName: 'Echo-1', phone: '', primaryRole: 'responder', secondaryRole: 'citizen', address: '', skills: ['First Aid', 'CPR', 'AED'], available: true },
+    { id: 'U-OPS-1', username: 'ops', displayName: 'Ops', phone: '', primaryRole: 'ops', secondaryRole: 'citizen', address: '', skills: ['Dispatch', 'Incident command'], available: true },
   ] as AppUser[],
 
-  zones: [
-    {
-      id: 'ZONE-BEDOK-01',
-      title: 'Bedok South flood watch',
-      kind: 'flood',
-      severity: 3 as SeverityLevel,
-      status: 'declared',
-      description: 'Drawn operating area for road flooding and pedestrian diversion.',
-      center: { lng: 103.93, lat: 1.322 },
-      area: [
-        { lng: 103.918, lat: 1.318 },
-        { lng: 103.942, lat: 1.318 },
-        { lng: 103.942, lat: 1.328 },
-        { lng: 103.918, lat: 1.328 },
-      ],
-      declaredBy: 'U-OPS-1',
-      createdAt: T(20),
-    },
-  ] as EmergencyZone[],
-
-  volunteerEvents: [
-    {
-      id: 'VOL-AED-01',
-      title: 'AED refresher standby',
-      category: 'first_aid_training',
-      description: 'Short refresher and standby roster for nearby AED responders.',
-      location: { lng: 103.85, lat: 1.3 },
-      venue: 'City Hall community room',
-      organizer: 'Ops Lead',
-      organizerRole: 'ops',
-      date: new Date(NOW + 86_400_000).toISOString().slice(0, 10),
-      status: 'upcoming',
-      skillsNeeded: ['AED', 'CPR'],
-      registeredResponderIds: ['R-ECHO-1'],
-      createdAt: T(40),
-    },
-    {
-      id: 'VOL-FLOOD-02',
-      title: 'DEMO · Flood welfare runners',
-      category: 'disaster_drill',
-      description: 'Demo standby roster for water, blankets, and wayfinding outside the restricted flood zone.',
-      location: { lng: 103.93, lat: 1.322 },
-      venue: 'Bedok South RC staging point',
-      organizer: 'Ops Lead',
-      organizerRole: 'ops',
-      date: new Date(NOW + 2 * 86_400_000).toISOString().slice(0, 10),
-      status: 'upcoming',
-      skillsNeeded: ['First Aid', 'Logistics', 'Tamil'],
-      registeredResponderIds: [],
-      createdAt: T(28),
-    },
-    {
-      id: 'VOL-FOOD-03',
-      title: 'DEMO · Elderly meal delivery cover',
-      category: 'food_distribution',
-      description: 'Community event posted by ops after lift outage reports. Non-emergency, no dispatch authority.',
-      location: { lng: 103.84, lat: 1.312 },
-      venue: 'Tiong Bahru community desk',
-      organizer: 'Ops Lead',
-      organizerRole: 'ops',
-      date: new Date(NOW + 3 * 86_400_000).toISOString().slice(0, 10),
-      status: 'upcoming',
-      skillsNeeded: ['Elderly care', 'Logistics'],
-      registeredResponderIds: ['R-CHARLIE-3'],
-      createdAt: T(18),
-    },
-  ] as VolunteerEvent[],
-
-  cases: [
-    {
-      id: 'CASE-ALPHA-09',
-      name: 'ALPHA-09',
-      severity: 4 as SeverityLevel,
-      centroid: { lng: 103.79, lat: 1.28 },
-      members: ['R-BRAVO-9', 'R-CHARLIE-3'],
-      captain: 'R-BRAVO-9',
-      state: 'active',
-      startedAt: T(60),
-      source: 'ops',
-    },
-    {
-      id: 'CASE-SCDF-77',
-      name: 'SCDF-77',
-      severity: 4 as SeverityLevel,
-      centroid: { lng: 103.864, lat: 1.336 },
-      members: ['R-SCDF-HAZMAT', 'R-SPF-12'],
-      captain: 'R-SCDF-HAZMAT',
-      state: 'staging',
-      startedAt: T(9),
-      source: 'professional',
-      restricted: true,
-    },
-  ] as CaseRoom[],
-
-  chat: [
-    {
-      id: 'CH-1',
-      caseId: 'CASE-ALPHA-09',
-      authorId: 'system',
-      kind: 'system',
-      text: 'Case ALPHA-09 formed. Bravo-9 captain. Charlie-3 joined.',
-      ts: T(60),
-    },
-    {
-      id: 'CH-2',
-      caseId: 'CASE-ALPHA-09',
-      authorId: 'R-BRAVO-9',
-      kind: 'message',
-      text: 'On scene. 3 casualties safely extracted. Requesting additional trauma supplies.',
-      ts: T(12),
-    },
-    {
-      id: 'CH-3',
-      caseId: 'CASE-ALPHA-09',
-      authorId: 'host',
-      kind: 'host',
-      text: 'Delta-1 is 1.0 km away with surplus supplies. Routed to your position.',
-      chips: [
-        { label: 'tool: responder_lookup', ref: 'R-DELTA-1' },
-        { label: 'tool: route', ref: '1.0 km · 3 min' },
-      ],
-      ts: T(11),
-    },
-    {
-      id: 'CH-4',
-      caseId: 'CASE-ALPHA-09',
-      authorId: 'R-CHARLIE-3',
-      kind: 'message',
-      text: 'Roger. Perimeter holding. Watching for hazmat from leaking tank.',
-      ts: T(8),
-    },
-  ] as ChatEntry[],
+  zones: [] as EmergencyZone[],
+  volunteerEvents: [] as VolunteerEvent[],
+  cases: [] as CaseRoom[],
+  chat: [] as ChatEntry[],
 
   sources: [
-    { id: 'src-1', name: 'NEA PSI', state: 'fresh', lastAgeS: 35 },
-    { id: 'src-2', name: 'NEA rainfall', state: 'fresh', lastAgeS: 22 },
-    { id: 'src-3', name: 'NEA 2hr forecast', state: 'fresh', lastAgeS: 90 },
-    { id: 'src-4', name: 'SCDF dispatch', state: 'fresh', lastAgeS: 12 },
-    { id: 'src-5', name: 'MOH alerts', state: 'fresh', lastAgeS: 90 },
-    { id: 'src-6', name: 'OneMap traffic', state: 'stale', lastAgeS: 540 },
-    { id: 'src-7', name: 'Reports intake', state: 'fresh', lastAgeS: 5 },
-    {
-      id: 'src-8',
-      name: 'Kampung Kaki backend',
-      state: 'shell_only',
-      lastAgeS: 0,
-      note: 'Express/WebSocket persistence not wired yet.',
-    },
-    {
-      id: 'src-9',
-      name: 'MQTT bridge',
-      state: 'not_configured',
-      lastAgeS: 0,
-      note: 'Mosquitto bridge is planned but not connected in shell phase.',
-    },
-    {
-      id: 'src-10',
-      name: 'OpenRouter Host AI',
-      state: 'shell_only',
-      lastAgeS: 0,
-      note: 'Server route /api/host/ask is wired. It returns not configured if OPENROUTER_API_KEY is missing.',
-    },
-    {
-      id: 'src-11',
-      name: 'LTA DataMall',
-      state: 'not_configured',
-      lastAgeS: 0,
-      note: 'Requires DATAMALL_ACCOUNT_KEY before traffic incidents/speed bands are live.',
-    },
-    {
-      id: 'src-12',
-      name: 'OneMap API services',
-      state: 'not_configured',
-      lastAgeS: 0,
-      note: 'Tiles are live. Reverse geocode/routes/themes need ONEMAP_API_KEY.',
-    },
-    {
-      id: 'src-13',
-      name: 'Hospital load',
-      state: 'unavailable',
-      lastAgeS: 0,
-      note: 'No real live hospital-load source configured. No fake values shown.',
-    },
+    { id: 'src-1', name: 'NEA PSI', state: 'not_configured', lastAgeS: 0 },
+    { id: 'src-2', name: 'NEA rainfall', state: 'not_configured', lastAgeS: 0 },
+    { id: 'src-3', name: 'NEA 2hr forecast', state: 'not_configured', lastAgeS: 0 },
+    { id: 'src-4', name: 'SCDF dispatch', state: 'not_configured', lastAgeS: 0 },
+    { id: 'src-5', name: 'MOH alerts', state: 'not_configured', lastAgeS: 0 },
+    { id: 'src-6', name: 'OneMap traffic', state: 'not_configured', lastAgeS: 0 },
+    { id: 'src-7', name: 'Reports intake', state: 'not_configured', lastAgeS: 0 },
+    { id: 'src-8', name: 'Kampung Kaki backend', state: 'not_configured', lastAgeS: 0, note: 'FastAPI backend not yet connected.' },
+    { id: 'src-9', name: 'MQTT bridge', state: 'not_configured', lastAgeS: 0, note: 'Mosquitto bridge not connected.' },
+    { id: 'src-10', name: 'OpenRouter Host AI', state: 'not_configured', lastAgeS: 0, note: '/api/host/ask wired. Set OPENROUTER_API_KEY to activate.' },
+    { id: 'src-11', name: 'LTA DataMall', state: 'not_configured', lastAgeS: 0, note: 'Requires DATAMALL_ACCOUNT_KEY.' },
+    { id: 'src-12', name: 'OneMap API services', state: 'not_configured', lastAgeS: 0, note: 'Tiles live. Geocode/routes need ONEMAP_API_KEY.' },
+    { id: 'src-13', name: 'Hospital load', state: 'unavailable', lastAgeS: 0, note: 'No live hospital-load source configured.' },
   ] as SourceHealth[],
 
-  notifications: [
-    {
-      id: 'NT-SEED-1',
-      tier: 'critical',
-      roles: ['ops', 'responder'],
-      title: 'SOS-029 medical active',
-      body: 'Medical SOS visible to ops and suitable responders. Fit scoring is shown before join/dispatch.',
-      targetId: 'SOS-029',
-      createdAt: T(0.5),
-      ackBy: [],
-    },
-    {
-      id: 'NT-SEED-2',
-      tier: 'watch',
-      roles: ['responder'],
-      title: 'Official unit nearby',
-      body: 'SCDF/SPF demo units are visible for deconfliction. Do not join restricted professional cases.',
-      targetId: 'CASE-SCDF-77',
-      createdAt: T(8),
-      ackBy: [],
-    },
-  ] as NotificationNotice[],
-
-  actionLogs: [
-    {
-      id: 'LOG-SEED-1',
-      actorId: 'system',
-      actorRole: 'system',
-      action: 'case.created',
-      targetId: 'CASE-ALPHA-09',
-      message: 'Ops case ALPHA-09 active. Bravo-9 captain. Charlie-3 on scene.',
-      severity: 4 as SeverityLevel,
-      createdAt: T(60),
-      visibleTo: ['ops', 'responder'],
-    },
-    {
-      id: 'LOG-SEED-2',
-      actorId: 'system',
-      actorRole: 'system',
-      action: 'sos.received',
-      targetId: 'SOS-029',
-      message: 'Citizen SOS created and broadcast to ops plus responder pool.',
-      severity: 4 as SeverityLevel,
-      createdAt: T(0.5),
-      visibleTo: ['ops', 'responder', 'citizen'],
-    },
-  ] as ActionLog[],
+  notifications: [] as NotificationNotice[],
+  actionLogs: [] as ActionLog[],
 };
 
 export const AppProvider = ({ children }: { children: ReactNode }) => {
@@ -794,6 +378,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   const [drawerContent, setDrawerContentRaw] = useState<string | null>(null);
   const [shellState, setShellState] = useState<ShellState>('S0');
 
+  const [backendOnline, setBackendOnline] = useState(false);
   const [events, setEvents] = useState<CanonicalEvent[]>(seed.events);
   const [reports, setReports] = useState<CitizenReport[]>(seed.reports);
   const [sosSessions, setSosSessions] = useState<DistressSession[]>(seed.sosSessions);
@@ -812,7 +397,47 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [activeCaseId, setActiveCaseId] = useState<string | null>(null);
   const [tracking, setTracking] = useState<TrackingState | null>(null);
+  const [selfLocation, setSelfLocation] = useState<LngLat | null>(null);
+  const [liveTracking, setLiveTracking] = useState(false);
+  const [draftPolygon, setDraftPolygon] = useState<LngLat[]>([]);
   const [selectedMapItem, setSelectedMapItem] = useState<SelectedMapItem | null>(null);
+  const autoTrackingKey = useRef<string | null>(null);
+
+  useEffect(() => {
+    const disconnect = connectWs((type, payload) => {
+      if (type === 'state:full') {
+        const s = payload as { responders: Responder[]; events: CanonicalEvent[]; sosSessions: DistressSession[]; reports: CitizenReport[]; cases: CaseRoom[]; chat: ChatEntry[] };
+        if (s.responders?.length) setResponders(s.responders as Responder[]);
+        if (s.events?.length) setEvents(s.events as CanonicalEvent[]);
+        if (s.sosSessions?.length) setSosSessions(s.sosSessions as DistressSession[]);
+        if (s.reports?.length) setReports(s.reports as CitizenReport[]);
+        if (s.cases?.length) setCases(s.cases as CaseRoom[]);
+        if (s.chat?.length) setChat(s.chat as ChatEntry[]);
+        setBackendOnline(true);
+      } else if (type === 'responder:updated') {
+        setResponders((prev) => prev.map((r) => (r.id === (payload as Responder).id ? (payload as Responder) : r)));
+      } else if (type === 'event:created') {
+        setEvents((prev) => [payload as CanonicalEvent, ...prev.filter((e) => e.id !== (payload as CanonicalEvent).id)]);
+      } else if (type === 'event:updated') {
+        setEvents((prev) => prev.map((e) => (e.id === (payload as CanonicalEvent).id ? (payload as CanonicalEvent) : e)));
+      } else if (type === 'sos:created') {
+        setSosSessions((prev) => [payload as DistressSession, ...prev.filter((s) => s.id !== (payload as DistressSession).id)]);
+      } else if (type === 'sos:updated') {
+        setSosSessions((prev) => prev.map((s) => (s.id === (payload as DistressSession).id ? (payload as DistressSession) : s)));
+      } else if (type === 'report:created') {
+        setReports((prev) => [payload as CitizenReport, ...prev.filter((r) => r.id !== (payload as CitizenReport).id)]);
+      } else if (type === 'report:updated') {
+        setReports((prev) => prev.map((r) => (r.id === (payload as CitizenReport).id ? (payload as CitizenReport) : r)));
+      } else if (type === 'case:created') {
+        setCases((prev) => [payload as CaseRoom, ...prev.filter((c) => c.id !== (payload as CaseRoom).id)]);
+      } else if (type === 'case:updated') {
+        setCases((prev) => prev.map((c) => (c.id === (payload as CaseRoom).id ? (payload as CaseRoom) : c)));
+      } else if (type === 'chat:message') {
+        setChat((prev) => [...prev, payload as ChatEntry]);
+      }
+    });
+    return disconnect;
+  }, []);
 
   const setDrawerContent = useCallback((id: string | null) => {
     setDrawerContentRaw(id);
@@ -833,9 +458,32 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     setTracking(null);
   };
 
-  // Live provider fetch is opt-in. This prevents the shell from burning real API quota on load.
   useEffect(() => {
-    if (import.meta.env.VITE_ENABLE_LIVE_PROVIDER_FETCH !== 'true') return;
+    const activeCitizenSos = role === 'citizen'
+      ? sosSessions.find((s) => !['resolved', 'cancelled'].includes(s.status))
+      : null;
+    const activeResponderSos = role === 'responder'
+      ? sosSessions.find((s) => s.assignedResponderId === SELF_ID && !['resolved', 'cancelled'].includes(s.status))
+      : null;
+    const activeResponderCase = role === 'responder'
+      ? cases.find((c) => c.members.includes(SELF_ID) && c.state !== 'resolved')
+      : null;
+    const nextKey =
+      activeCitizenSos ? `citizen:${activeCitizenSos.id}` :
+      activeResponderSos ? `responder:sos:${activeResponderSos.id}` :
+      activeResponderCase ? `responder:case:${activeResponderCase.id}` :
+      null;
+
+    if (nextKey && autoTrackingKey.current !== nextKey) {
+      autoTrackingKey.current = nextKey;
+      setLiveTracking(true);
+    }
+    if (!nextKey) {
+      autoTrackingKey.current = null;
+    }
+  }, [role, sosSessions, cases]);
+
+  useEffect(() => {
     let alive = true;
     const pull = async () => {
       const snap = await fetchLiveSnapshot();
@@ -926,6 +574,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
 
   const fileReport: AppState['fileReport'] = (r) => {
     const id = newId('REP');
+    api.createReport({ kind: r.kind, title: r.title, body: r.body, location: r.location }).catch(() => {});
     const rec: CitizenReport = {
       ...r,
       id,
@@ -1067,6 +716,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
 
   const startSos: AppState['startSos'] = (s) => {
     const id = newId('SOS');
+    api.createSos({ citizenName: s.citizenName, category: s.category, location: s.location }).catch(() => {});
     setSosSessions((prev) => [
       { ...s, id, status: 'requesting', startedAt: Date.now() },
       ...prev,
@@ -1105,6 +755,8 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     return id;
   };
   const assignSos: AppState['assignSos'] = (sosId, responderId) => {
+    api.patchSos(sosId, { status: 'acknowledged', assignedResponderId: responderId }).catch(() => {});
+    api.patchResponder(responderId, { status: 'en_route', assignedSosId: sosId }).catch(() => {});
     const responder = responders.find((r) => r.id === responderId);
     const sos = sosSessions.find((s) => s.id === sosId);
     setSosSessions((prev) =>
@@ -1141,9 +793,11 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       tone: 'critical',
       drawerId: 'sos_live',
     });
+    setLiveTracking(true);
   };
   const advanceSos: AppState['advanceSos'] = (sosId, to) => {
     const sos = sosSessions.find((s) => s.id === sosId);
+    api.patchSos(sosId, { status: to }).catch(() => {});
     setSosSessions((prev) => prev.map((s) => (s.id === sosId ? { ...s, status: to } : s)));
     if (sos?.assignedResponderId) {
       setResponders((prev) =>
@@ -1230,6 +884,35 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       targetId: sosId,
     });
   };
+
+  const messageCitizen: AppState['messageCitizen'] = (targetId, responderId, text) => {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    const responder = responders.find((r) => r.id === responderId);
+    const sos = sosSessions.find((s) => s.id === targetId);
+    const caseRoom = cases.find((c) => c.id === targetId);
+    const targetLabel = sos
+      ? `${sos.id} (${sos.category})`
+      : caseRoom
+      ? `case ${caseRoom.name}`
+      : targetId;
+    pushLog({
+      actorId: responderId,
+      actorRole: 'responder',
+      action: 'citizen.message_sent',
+      targetId,
+      message: `${responder?.name ?? responderId} messaged the citizen/reporter for ${targetLabel}: ${trimmed}`,
+      severity: sos ? 4 : caseRoom?.severity,
+      visibleTo: ['ops', 'responder', 'citizen'],
+    });
+    pushNotification({
+      tier: sos || (caseRoom?.severity ?? 0) >= 4 ? 'urgent' : 'info',
+      roles: ['citizen'],
+      title: sos ? 'Responder message for your SOS' : 'Responder update for your report',
+      body: trimmed,
+      targetId,
+    });
+  };
   const cancelSos: AppState['cancelSos'] = (sosId) => {
     setSosSessions((prev) => prev.map((s) => (s.id === sosId ? { ...s, status: 'cancelled' } : s)));
     pushLog({
@@ -1245,6 +928,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
 
   const declareIncident: AppState['declareIncident'] = (e) => {
     const id = newId('EV');
+    api.createEvent({ kind: e.kind, title: e.title, severity: e.severity, location: e.location, area: e.area, source: e.source }).catch(() => {});
     setEvents((prev) => [{ ...e, id, status: 'verified', createdAt: Date.now() }, ...prev]);
     pushLog({
       actorId: 'ops',
@@ -1384,6 +1068,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const updateResponderStatus: AppState['updateResponderStatus'] = (responderId, status) => {
+    api.patchResponder(responderId, { status }).catch(() => {});
     setResponders((prev) => prev.map((r) => (r.id === responderId ? { ...r, status } : r)));
     pushLog({
       actorId: 'ops',
@@ -1465,30 +1150,47 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
-  const fallbackHost = (query: string): Pick<ChatEntry, 'text' | 'chips'> => {
+  const fallbackHost = (query: string, caseId: string): Pick<ChatEntry, 'text' | 'chips'> => {
     const q = query.toLowerCase();
-    let text = 'Try /host help for commands.';
-    let chips: ChatEntry['chips'] = [];
+    const caseRoom = cases.find((c) => c.id === caseId);
+    const caseMembers = caseRoom ? responders.filter((r) => caseRoom.members.includes(r.id)) : [];
+    let text = 'Host AI unavailable. Try /host help for commands.';
+    let chips: ChatEntry['chips'] = [{ label: 'tool: host_ai', ref: 'unavailable' }];
     if (q.includes('status')) {
-      text = 'Case ALPHA-09 · active 1h · 2 responders on scene · no new SOS pings within 200 m.';
-      chips = [{ label: 'tool: case_state', ref: 'active' }, { label: 'tool: roster', ref: '2/4' }];
+      if (caseRoom) {
+        const onScene = caseMembers.filter((r) => r.status === 'on_scene').length;
+        const enRoute = caseMembers.filter((r) => r.status === 'en_route').length;
+        text = `${caseRoom.name} · ${caseRoom.state} · ${caseMembers.length} members · ${onScene} on scene · ${enRoute} en route.`;
+        chips = [{ label: 'tool: case_state', ref: caseRoom.state }, { label: 'tool: roster', ref: `${caseMembers.length}` }];
+      } else {
+        text = 'Case state unavailable.';
+        chips = [{ label: 'tool: case_state', ref: 'unavailable' }];
+      }
     } else if (q.includes('aed') || q.includes('nearest')) {
-      text = 'Nearest AED unavailable: OneMap theme retrieval is configured for backend integration but is not wired into Host yet. No guessed AED is shown.';
+      text = 'Nearest AED: unavailable. OneMap theme layer not yet wired.';
       chips = [{ label: 'tool: onemap_theme', ref: 'unavailable' }];
     } else if (q.includes('hospital')) {
-      text = 'Hospital load unavailable: no real live hospital-load source is configured. No fake wait time or load ranking is shown.';
+      text = 'Hospital load: unavailable. No live source wired.';
       chips = [{ label: 'tool: hospital_load', ref: 'unavailable' }];
     } else if (q.includes('weather') || q.includes('psi')) {
       const psi = liveSnapshot?.psi[0];
       text = psi
-        ? `PSI national ${psi.psi24h}. Air quality ${(psi.psi24h ?? 0) < 55 ? 'good' : 'unhealthy'}. Source NEA live.`
-        : 'NEA live not yet fetched.';
-      chips = [{ label: 'tool: nea_psi', ref: psi ? 'live' : 'pending' }];
+        ? `PSI national ${psi.psi24h}. Air quality ${(psi.psi24h ?? 0) < 55 ? 'good' : 'moderate'}. Source: NEA live.`
+        : 'NEA PSI: unavailable. Live fetch not yet complete.';
+      chips = [{ label: 'tool: nea_psi', ref: psi ? 'live' : 'unavailable' }];
     } else if (q.includes('escalate')) {
-      text = 'Escalation NOT recommended. Casualties stable.';
-      chips = [{ label: 'tool: case_state', ref: 'active' }];
+      if (caseRoom) {
+        text = caseRoom.severity >= 4
+          ? `Severity ${caseRoom.severity} active. Review roster and SOS queue before deciding.`
+          : `Severity ${caseRoom.severity}. No automatic escalation threshold reached.`;
+        chips = [{ label: 'tool: case_state', ref: caseRoom.state }];
+      } else {
+        text = 'Escalation assessment unavailable: no active case found.';
+        chips = [{ label: 'tool: case_state', ref: 'unavailable' }];
+      }
     } else if (q.includes('help')) {
-      text = 'Available: /host status · /host nearest aed · /host hospital load · /host weather · /host escalate?';
+      text = 'Commands: /host status · /host nearest aed · /host hospital load · /host weather · /host escalate?';
+      chips = [];
     }
     return { text, chips };
   };
@@ -1497,6 +1199,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     const id = newId('CH');
     const caseRoom = cases.find((c) => c.id === caseId);
     const caseEvent = events.find((e) => e.caseId === caseId);
+    const caseMembers = responders.filter((r) => caseRoom?.members.includes(r.id));
     askHostAi({
       role,
       workspace: 'case_lobby',
@@ -1504,27 +1207,21 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       context: {
         case: caseRoom,
         event: caseEvent,
-        responders: responders.filter((r) => caseRoom?.members.includes(r.id)),
-        liveSnapshotAvailable: !!liveSnapshot,
+        responders: caseMembers.map((r) => ({ id: r.id, name: r.name, status: r.status, role: r.role })),
+        liveSnapshot: liveSnapshot ? { psi: liveSnapshot.psi?.[0] ?? null } : null,
       },
     })
       .then((reply) => {
-        const fallback = fallbackHost(query);
+        const entry = reply.state === 'live'
+          ? { text: reply.text, chips: reply.chips }
+          : fallbackHost(query, caseId);
         setChat((prev) => [
           ...prev,
-          {
-            id,
-            caseId,
-            authorId: 'host',
-            kind: 'host',
-            text: reply.state === 'live' ? reply.text : `${reply.text} ${fallback.text}`,
-            chips: reply.chips?.length ? reply.chips : fallback.chips,
-            ts: Date.now(),
-          },
+          { id, caseId, authorId: 'host', kind: 'host', ...entry, ts: Date.now() },
         ]);
       })
       .catch(() => {
-        const fallback = fallbackHost(query);
+        const fallback = fallbackHost(query, caseId);
         setChat((prev) => [
           ...prev,
           { id, caseId, authorId: 'host', kind: 'host', text: fallback.text, chips: fallback.chips, ts: Date.now() },
@@ -1589,6 +1286,10 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
           : c
       )
     );
+    if (caseRoom && !caseRoom.members.includes(responderId)) {
+      api.patchCase(caseId, { members: [...caseRoom.members, responderId] }).catch(() => {});
+    }
+    setLiveTracking(true);
     pushLog({
       actorId: responderId,
       actorRole: 'responder',
@@ -1600,11 +1301,15 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     });
   };
   const leaveCase: AppState['leaveCase'] = (caseId, responderId) => {
+    const caseRoom = cases.find((c) => c.id === caseId);
     setCases((prev) =>
       prev.map((c) =>
         c.id === caseId ? { ...c, members: c.members.filter((m) => m !== responderId) } : c
       )
     );
+    if (caseRoom) {
+      api.patchCase(caseId, { members: caseRoom.members.filter((m) => m !== responderId) }).catch(() => {});
+    }
     pushLog({
       actorId: responderId,
       actorRole: 'responder',
@@ -1633,6 +1338,12 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       body: `${event?.title ?? eventId}. Ops must create/assign the case; responders cannot draw their own polygons.`,
       targetId: eventId,
     });
+  };
+
+  const updateResponderLocation: AppState['updateResponderLocation'] = (responderId, loc) => {
+    setResponders((prev) =>
+      prev.map((r) => (r.id === responderId ? { ...r, location: loc } : r))
+    );
   };
 
   const closeCase: AppState['closeCase'] = (caseId, finalReport) => {
@@ -1674,165 +1385,6 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       body: `The case linked to your area (${target?.name ?? caseId}) has been closed by ops. Thank you for your report.`,
       targetId: caseId,
     });
-  };
-
-  const runDemoScenario: AppState['runDemoScenario'] = (scenario) => {
-    const now = Date.now();
-    if (scenario === 'medical_sos') {
-      const sosId = newId('DEMO-SOS');
-      setSosSessions((prev) => [
-        {
-          id: sosId,
-          citizenName: 'DEMO_PATIENT',
-          category: 'medical',
-          location: { lng: 103.852, lat: 1.293 },
-          status: 'requesting',
-          startedAt: now,
-        },
-        ...prev,
-      ]);
-      setReports((prev) => [
-        {
-          id: newId('DEMO-REP'),
-          kind: 'medical',
-          title: 'DEMO · Collapse near City Hall MRT',
-          body: 'Demo injection for SOS intake, AED lookup, dispatch, and responder tracking.',
-          location: { lng: 103.852, lat: 1.293 },
-          reporterTrust: 1,
-          status: 'pending',
-          createdAt: now,
-        },
-        ...prev,
-      ]);
-      setTracking({
-        kind: 'DEMO SOS',
-        title: 'Injected medical SOS · awaiting dispatch',
-        eta: 'demo',
-        progress: 0.15,
-        tone: 'critical',
-        drawerId: 'distress_oversight',
-      });
-      setSelectedId(sosId);
-      setDrawerContent('distress_oversight');
-      return;
-    }
-
-    if (scenario === 'flood_zone') {
-      const zoneId = newId('DEMO-ZONE');
-      const center = { lng: 103.93, lat: 1.322 };
-      const area = [
-        { lng: 103.919, lat: 1.316 },
-        { lng: 103.944, lat: 1.317 },
-        { lng: 103.946, lat: 1.329 },
-        { lng: 103.922, lat: 1.331 },
-      ];
-      setZones((prev) => [
-        {
-          id: zoneId,
-          title: 'DEMO · Flash flood operating zone',
-          kind: 'flood',
-          severity: 4 as SeverityLevel,
-          status: 'declared',
-          description: 'Demo zone for ops declaration, map polygon, alerts, and responder bulletin workflows.',
-          center,
-          area,
-          declaredBy: 'demo-god-mode',
-          createdAt: now,
-        },
-        ...prev,
-      ]);
-      setEvents((prev) => [
-        {
-          id: newId('DEMO-EV'),
-          kind: 'flood',
-          title: 'DEMO · Flash flood at Bedok South',
-          severity: 4 as SeverityLevel,
-          status: 'verified',
-          location: center,
-          area,
-          source: 'DEMO injection · God Mode',
-          createdAt: now,
-          liveValue: 'demo rainfall surge',
-        },
-        ...prev,
-      ]);
-      setDrawerContent('zones');
-      return;
-    }
-
-    if (scenario === 'traffic_case') {
-      const eventId = newId('DEMO-EV');
-      const caseId = newId('DEMO-CASE');
-      const location = { lng: 103.79, lat: 1.28 };
-      setEvents((prev) => [
-        {
-          id: eventId,
-          kind: 'crash',
-          title: 'DEMO · AYE multi-vehicle collision',
-          severity: 4 as SeverityLevel,
-          status: 'verified',
-          location,
-          source: 'DEMO injection · God Mode',
-          createdAt: now,
-          caseId,
-        },
-        ...prev,
-      ]);
-      setCases((prev) => [
-        {
-          id: caseId,
-          name: caseId.replace('DEMO-CASE-', 'DEMO-'),
-          severity: 4 as SeverityLevel,
-          centroid: location,
-          members: ['R-BRAVO-9', 'R-ECHO-1'],
-          captain: 'R-BRAVO-9',
-          state: 'active',
-          startedAt: now,
-          source: 'ops',
-        },
-        ...prev,
-      ]);
-      setResponders((prev) =>
-        prev.map((r) =>
-          r.id === 'R-ECHO-1' ? { ...r, status: 'en_route', location: { lng: 103.83, lat: 1.305 } } : r
-        )
-      );
-      setChat((prev) => [
-        ...prev,
-        {
-          id: newId('DEMO-CH'),
-          caseId,
-          authorId: 'system',
-          kind: 'system',
-          text: 'DEMO case injected: crash event, active room, Echo-1 assignment, and Host command surface ready.',
-          ts: now,
-        },
-      ]);
-      setActiveCaseId(caseId);
-      setDrawerContent('case_lobby');
-      return;
-    }
-
-    const eventId = newId('DEMO-VOL');
-    setVolunteerEvents((prev) => [
-      {
-        id: eventId,
-        title: 'DEMO · AED responder mobilisation drive',
-        category: 'first_aid_training',
-        description: 'Demo community workflow for event creation, responder signup, and skills matching.',
-        location: { lng: 103.85, lat: 1.3 },
-        venue: 'City Hall community room',
-        organizer: 'God Mode demo',
-        organizerRole: 'ops',
-        date: new Date(now + 86_400_000).toISOString().slice(0, 10),
-        status: 'upcoming',
-        skillsNeeded: ['AED', 'CPR', 'First Aid'],
-        registeredResponderIds: [],
-        createdAt: now,
-      },
-      ...prev,
-    ]);
-    setDrawerContent('volunteer_events');
   };
 
   // Simulated responder movement
@@ -1882,6 +1434,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     setRole,
     demoLogin,
     demoLogout,
+    pushNotification,
     drawerContent,
     setDrawerContent,
     shellState,
@@ -1919,7 +1472,12 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     advanceSos,
     confirmSosSafe,
     cancelSos,
+    messageCitizen,
     declareIncident,
+    resolveEvent: (eventId: string) => {
+      api.patchEvent(eventId, { status: 'resolved' }).catch(() => {});
+      setEvents((prev) => prev.filter((e) => e.id !== eventId));
+    },
     declareZone,
     updateZoneStatus,
     assignIncident,
@@ -1939,7 +1497,13 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     requestCaseFormation,
     closeCase,
     ackNotification,
-    runDemoScenario,
+    selfLocation,
+    setSelfLocation,
+    liveTracking,
+    setLiveTracking,
+    updateResponderLocation,
+    draftPolygon,
+    setDraftPolygon,
   };
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
