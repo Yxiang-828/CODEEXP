@@ -8,11 +8,16 @@ import {
   UsersRound,
   LogIn,
   LogOut,
+  Calendar,
+  User,
 } from 'lucide-react';
+import type React from 'react';
 import { useAppContext } from '../../../AppContext';
+import type { DistressSession, VolunteerEvent } from '../../../AppContext';
 import SeverityChip from '../../primitives/SeverityChip';
 import StatusPipeline from '../../primitives/StatusPipeline';
 import SlashComposer from '../../primitives/SlashComposer';
+import { etaMinutes, filterWithinKm, getDistanceKm } from '../../../utils/geo';
 
 export function DutyStatus() {
   const { responders, toggleDuty, selfResponderId } = useAppContext();
@@ -101,9 +106,11 @@ export function FormCase() {
 }
 
 export function AssignmentDetail() {
-  const { sosSessions, responders, advanceSos, selfResponderId } = useAppContext();
+  const { sosSessions, responders, advanceSos, selfResponderId, cases, events, setActiveCaseId, setDrawerContent, sendChat } = useAppContext();
   const sos = sosSessions.find((s) => s.assignedResponderId === selfResponderId);
-  if (!sos) {
+  const activeCase = cases.find((c) => c.members.includes(selfResponderId) && c.state !== 'resolved');
+  const caseEvent = activeCase ? events.find((e) => e.caseId === activeCase.id) : null;
+  if (!sos && !activeCase) {
     return (
       <div className="p-5 flex flex-col gap-3">
         <h2 className="text-xl font-serif italic font-black">No active assignment</h2>
@@ -111,6 +118,38 @@ export function AssignmentDetail() {
       </div>
     );
   }
+  if (!sos && activeCase) {
+    return (
+      <div className="p-5 flex flex-col gap-4">
+        <div className="flex items-start gap-2 flex-wrap">
+          <SeverityChip level={activeCase.severity} />
+          <h2 className="flex-1 text-xl font-serif italic font-black min-w-0">#{activeCase.name}</h2>
+        </div>
+        <StatusPipeline
+          steps={['Forming', 'Staging', 'Active', 'Consolidating', 'Resolved']}
+          currentIndex={['forming', 'staging', 'active', 'consolidating', 'resolved'].indexOf(activeCase.state)}
+        />
+        <Card>
+          <strong className="block uppercase text-[10px] tracking-widest mb-1">Incident</strong>
+          {caseEvent?.title ?? 'Case assignment'} · captain {activeCase.captain}
+        </Card>
+        <Card>
+          <strong className="block uppercase text-[10px] tracking-widest mb-1">Location</strong>
+          {activeCase.centroid.lat.toFixed(4)}°N {activeCase.centroid.lng.toFixed(4)}°E
+        </Card>
+        <button
+          onClick={() => {
+            setActiveCaseId(activeCase.id);
+            setDrawerContent('case_lobby');
+          }}
+          className="w-full bg-surface-3 text-text-inverse py-3 text-[10px] uppercase font-bold tracking-widest border border-border-strong shadow-[3px_3px_0_rgba(26,26,26,1)]"
+        >
+          Open case room
+        </button>
+      </div>
+    );
+  }
+  if (!sos) return null;
   const steps = ['Assigned', 'Ack', 'En route', 'On scene', 'Resolving', 'Resolved'];
   const idx = ['ack', 'ack', 'en_route', 'arrived', 'resolving', 'resolved'].indexOf(sos.status);
   const me = responders.find((r) => r.id === selfResponderId);
@@ -137,15 +176,233 @@ export function AssignmentDetail() {
           <CheckCircle className="w-3 h-3 inline mr-1" />
           Arrived
         </button>
-        <button className="w-full bg-surface-0 py-3 text-[10px] uppercase font-bold tracking-widest border border-border-strong">
+        <button
+          onClick={() =>
+            window.open(
+              `https://www.google.com/maps?q=${sos.location.lat},${sos.location.lng}`,
+              '_blank',
+              'noopener,noreferrer'
+            )
+          }
+          className="w-full bg-surface-0 py-3 text-[10px] uppercase font-bold tracking-widest border border-border-strong"
+        >
           <Navigation className="w-3 h-3 inline mr-1" />
           Navigate
         </button>
-        <button className="w-full bg-accent-warning text-text-primary py-3 text-[10px] uppercase font-bold tracking-widest border border-border-strong">
+        <button
+          onClick={() => {
+            advanceSos(sos.id, 'resolving');
+            sendChat('CASE-ALPHA-09', selfResponderId, `Unable / handoff requested for ${sos.id}.`);
+          }}
+          className="w-full bg-accent-warning text-text-primary py-3 text-[10px] uppercase font-bold tracking-widest border border-border-strong"
+        >
           <AlertTriangle className="w-3 h-3 inline mr-1" />
           Unable / handoff
         </button>
       </div>
+    </div>
+  );
+}
+
+export function VolunteerEvents() {
+  const { volunteerEvents, joinVolunteerEvent, selfResponderId, responders } = useAppContext();
+  const self = responders.find((r) => r.id === selfResponderId);
+  const origin = self?.location ?? { lng: 103.85, lat: 1.3 };
+  const nearby = filterWithinKm<VolunteerEvent>(volunteerEvents, origin, 8);
+  return (
+    <div className="flex flex-col h-full">
+      <div className="p-4 border-b border-border-strong">
+        <h2 className="text-xl font-serif italic font-black flex items-center gap-2">
+          <Calendar className="w-4 h-4" />
+          Volunteer events
+        </h2>
+        <p className="text-[10px] uppercase font-bold tracking-widest text-text-secondary">
+          Community and standby requests sorted by distance
+        </p>
+      </div>
+      <div className="flex-1 overflow-y-auto">
+        {nearby.length === 0 && (
+          <div className="p-6 text-[10px] uppercase font-bold tracking-widest text-text-secondary">
+            No volunteer events within 8 km.
+          </div>
+        )}
+        {nearby.map(({ item: e, distanceKm }) => {
+          const joined = e.registeredResponderIds.includes(selfResponderId);
+          return (
+            <div key={e.id} className="p-3 border-b border-border-strong">
+              <div className="flex items-start gap-2">
+                <Calendar className="w-4 h-4 mt-0.5" />
+                <div className="flex-1 min-w-0">
+                  <div className="text-[11px] uppercase font-bold tracking-widest">{e.title}</div>
+                  <div className="text-[9px] uppercase tracking-widest text-text-secondary">
+                    {distanceKm.toFixed(1)} km · {e.date} · {e.venue} · {e.status}
+                  </div>
+                </div>
+              </div>
+              <p className="text-[10px] mt-2 leading-relaxed">{e.description}</p>
+              <div className="flex flex-wrap gap-1 mt-2">
+                {e.skillsNeeded.map((s) => (
+                  <span key={s} className="px-1.5 py-0.5 border border-border-strong text-[8px] uppercase font-bold tracking-widest">
+                    {s}
+                  </span>
+                ))}
+              </div>
+              <button
+                disabled={joined}
+                onClick={() => joinVolunteerEvent(e.id, selfResponderId)}
+                className={`mt-2 w-full py-2 text-[9px] uppercase font-bold tracking-widest border border-border-strong shadow-[2px_2px_0_rgba(26,26,26,1)] ${
+                  joined ? 'bg-accent-success text-surface-3' : 'bg-surface-0'
+                }`}
+              >
+                {joined ? 'Registered' : 'Join event'}
+              </button>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+export function JoinableMissions() {
+  const {
+    events,
+    sosSessions,
+    cases,
+    responders,
+    selfResponderId,
+    assignSos,
+    joinCase,
+    setActiveCaseId,
+    setDrawerContent,
+  } = useAppContext();
+  const self = responders.find((r) => r.id === selfResponderId);
+  const origin = self?.location ?? { lng: 103.85, lat: 1.3 };
+  const openSos = filterWithinKm<DistressSession>(
+    sosSessions.filter((s) => s.status === 'requesting').map((s) => ({ ...s, location: s.location })),
+    origin,
+    8
+  );
+  const joinableCases = cases
+    .filter((c) => !c.members.includes(selfResponderId) && c.state !== 'resolved')
+    .map((c) => ({
+      caseRoom: c,
+      event: events.find((e) => e.caseId === c.id),
+      distanceKm: getDistanceKm(origin, c.centroid),
+    }))
+    .filter((c) => c.distanceKm <= 8)
+    .sort((a, b) => a.distanceKm - b.distanceKm);
+  return (
+    <div className="flex flex-col h-full">
+      <div className="p-4 border-b border-border-strong">
+        <h2 className="text-xl font-serif italic font-black">Joinable missions</h2>
+        <p className="text-[10px] uppercase font-bold tracking-widest text-text-secondary">
+          Within 8 km · SOS and active case rooms
+        </p>
+      </div>
+      <div className="flex-1 overflow-y-auto">
+        <Section title={`Open SOS (${openSos.length})`}>
+          {openSos.length === 0 && <EmptyLine>No open SOS within 8 km.</EmptyLine>}
+          {openSos.map(({ item, distanceKm }) => (
+            <div key={item.id} className="p-3 border-b border-border-strong">
+              <div className="flex items-center gap-2">
+                <SeverityChip level={4} />
+                <div className="flex-1 min-w-0">
+                  <div className="text-[11px] uppercase font-bold tracking-widest">
+                    {item.id} · {item.category}
+                  </div>
+                  <div className="text-[9px] uppercase tracking-widest text-text-secondary">
+                    {distanceKm.toFixed(1)} km · ETA {etaMinutes(distanceKm)} min · citizen {item.citizenName}
+                  </div>
+                </div>
+              </div>
+              <button
+                onClick={() => {
+                  assignSos(item.id, selfResponderId);
+                  setDrawerContent('assignment_detail');
+                }}
+                className="mt-2 w-full bg-accent-critical text-text-inverse py-2 text-[9px] uppercase font-bold tracking-widest border border-border-strong shadow-[2px_2px_0_rgba(26,26,26,1)]"
+              >
+                Accept SOS
+              </button>
+            </div>
+          ))}
+        </Section>
+        <Section title={`Case rooms (${joinableCases.length})`}>
+          {joinableCases.length === 0 && <EmptyLine>No joinable case rooms within 8 km.</EmptyLine>}
+          {joinableCases.map(({ caseRoom, event, distanceKm }) => (
+            <div key={caseRoom.id} className="p-3 border-b border-border-strong">
+              <div className="flex items-center gap-2">
+                <SeverityChip level={caseRoom.severity} />
+                <div className="flex-1 min-w-0">
+                  <div className="text-[11px] uppercase font-bold tracking-widest">
+                    #{caseRoom.name}
+                  </div>
+                  <div className="text-[9px] uppercase tracking-widest text-text-secondary">
+                    {distanceKm.toFixed(1)} km · {caseRoom.state} · {caseRoom.members.length} members
+                  </div>
+                </div>
+              </div>
+              <p className="text-[10px] mt-2 leading-relaxed">{event?.title ?? 'Case assignment'}</p>
+              <button
+                onClick={() => {
+                  joinCase(caseRoom.id, selfResponderId);
+                  setActiveCaseId(caseRoom.id);
+                  setDrawerContent('case_lobby');
+                }}
+                className="mt-2 w-full bg-accent-success text-surface-3 py-2 text-[9px] uppercase font-bold tracking-widest border border-border-strong shadow-[2px_2px_0_rgba(26,26,26,1)]"
+              >
+                Join case
+              </button>
+            </div>
+          ))}
+        </Section>
+      </div>
+    </div>
+  );
+}
+
+export function ProfileWorkspace() {
+  const { users, updateUserProfile, selfResponderId, responders, role } = useAppContext();
+  const activeUserId = role === 'ops' ? 'U-OPS-1' : role === 'citizen' ? 'U-CIV-1' : selfResponderId;
+  const user = users.find((u) => u.id === activeUserId) ?? users[0];
+  const responder = responders.find((r) => r.id === selfResponderId);
+  if (!user) return null;
+  return (
+    <div className="p-5 flex flex-col gap-4">
+      <h2 className="text-xl font-serif italic font-black flex items-center gap-2">
+        <User className="w-4 h-4" />
+        Profile
+      </h2>
+      <Card>
+        <strong className="block uppercase text-[10px] tracking-widest mb-1">{user.displayName}</strong>
+        @{user.username} · {user.phone}
+      </Card>
+      <Card>
+        <strong className="block uppercase text-[10px] tracking-widest mb-1">Role</strong>
+        {user.primaryRole} {user.secondaryRole ? `· secondary ${user.secondaryRole}` : ''} · status {responder?.status ?? 'active'}
+      </Card>
+      <Field label="Display name">
+        <input
+          defaultValue={user.displayName}
+          onBlur={(e) => updateUserProfile(user.id, { displayName: e.target.value })}
+          className="w-full p-2 border border-border-strong bg-surface-0 text-sm font-mono outline-none"
+        />
+      </Field>
+      <Field label="Skills">
+        <input
+          defaultValue={user.skills.join(', ')}
+          onBlur={(e) =>
+            updateUserProfile(user.id, {
+              skills: e.target.value
+                .split(',')
+                .map((s) => s.trim())
+                .filter(Boolean),
+            })
+          }
+          className="w-full p-2 border border-border-strong bg-surface-0 text-sm font-mono outline-none"
+        />
+      </Field>
     </div>
   );
 }
@@ -274,6 +531,14 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
+function EmptyLine({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="p-3 text-[10px] uppercase font-bold tracking-widest text-text-secondary">
+      {children}
+    </div>
+  );
+}
+
 function Row({
   title,
   tag,
@@ -282,6 +547,7 @@ function Row({
   joined,
   onToggle,
 }: {
+  key?: React.Key;
   title: string;
   tag: string;
   meta: string;
@@ -380,7 +646,7 @@ export function CaseLobby() {
   );
 }
 
-function ChatRow({ entry, self }: { entry: import('../../../AppContext').ChatEntry; self: string }) {
+function ChatRow({ entry, self }: { key?: React.Key; entry: import('../../../AppContext').ChatEntry; self: string }) {
   if (entry.kind === 'system') {
     return (
       <div className="text-center text-[9px] uppercase tracking-widest font-bold text-text-secondary py-1 border-y border-dashed border-border-strong">
@@ -423,6 +689,17 @@ function ChatRow({ entry, self }: { entry: import('../../../AppContext').ChatEnt
         {isMe ? 'You' : entry.authorId}
       </div>
       <p className="text-[11px] leading-relaxed">{entry.text}</p>
+    </div>
+  );
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex flex-col gap-1">
+      <label className="text-[9px] uppercase font-bold tracking-widest text-text-secondary">
+        {label}
+      </label>
+      {children}
     </div>
   );
 }

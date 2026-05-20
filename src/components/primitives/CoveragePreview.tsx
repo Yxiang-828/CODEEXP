@@ -12,6 +12,8 @@ interface Props {
   partialCells?: number;
   highReachWarning?: boolean;
   className?: string;
+  onSnap?: () => void;
+  onKeep?: () => void;
 }
 
 export default function CoveragePreview({
@@ -22,6 +24,8 @@ export default function CoveragePreview({
   partialCells = 0,
   highReachWarning = false,
   className = '',
+  onSnap,
+  onKeep,
 }: Props) {
   return (
     <div
@@ -50,10 +54,16 @@ export default function CoveragePreview({
         <div className="px-4 py-2 border-t border-border-strong flex items-center justify-between text-[10px] uppercase font-bold tracking-widest bg-accent-warning text-text-primary">
           <span>{partialCells} partial cell{partialCells === 1 ? '' : 's'}</span>
           <div className="flex gap-1">
-            <button className="px-2 py-0.5 bg-surface-0 border border-border-strong shadow-[2px_2px_0px_rgba(26,26,26,1)] hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none transition-all">
+            <button
+              onClick={onSnap}
+              className="px-2 py-0.5 bg-surface-0 border border-border-strong shadow-[2px_2px_0px_rgba(26,26,26,1)] hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none transition-all"
+            >
               Snap
             </button>
-            <button className="px-2 py-0.5 bg-surface-0 border border-border-strong shadow-[2px_2px_0px_rgba(26,26,26,1)] hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none transition-all">
+            <button
+              onClick={onKeep}
+              className="px-2 py-0.5 bg-surface-0 border border-border-strong shadow-[2px_2px_0px_rgba(26,26,26,1)] hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none transition-all"
+            >
               Keep
             </button>
           </div>

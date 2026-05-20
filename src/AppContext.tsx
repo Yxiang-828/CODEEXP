@@ -77,6 +77,54 @@ export interface Responder {
   groups: string[]; // group ids
 }
 
+export interface AppUser {
+  id: string;
+  username: string;
+  displayName: string;
+  phone: string;
+  primaryRole: Role;
+  secondaryRole?: Role;
+  address: string;
+  skills: string[];
+  available: boolean;
+}
+
+export interface EmergencyZone {
+  id: string;
+  title: string;
+  kind: 'health' | 'fire' | 'flood' | 'accident' | 'hazard';
+  severity: SeverityLevel;
+  status: 'draft' | 'pending_review' | 'declared' | 'archived';
+  description: string;
+  center: LngLat;
+  area: LngLat[];
+  declaredBy: string;
+  createdAt: number;
+}
+
+export interface VolunteerEvent {
+  id: string;
+  title: string;
+  category:
+    | 'community_cleanup'
+    | 'first_aid_training'
+    | 'disaster_drill'
+    | 'food_distribution'
+    | 'elderly_care'
+    | 'youth_mentoring'
+    | 'environmental'
+    | 'other';
+  description: string;
+  location: LngLat;
+  venue: string;
+  organizer: string;
+  date: string;
+  status: 'upcoming' | 'ongoing' | 'completed' | 'cancelled';
+  skillsNeeded: string[];
+  registeredResponderIds: string[];
+  createdAt: number;
+}
+
 export interface CaseRoom {
   id: string;
   name: string;
@@ -101,8 +149,9 @@ export interface ChatEntry {
 export interface SourceHealth {
   id: string;
   name: string;
-  state: 'fresh' | 'stale' | 'down';
+  state: 'fresh' | 'stale' | 'down' | 'shell_only' | 'not_configured' | 'unavailable';
   lastAgeS: number;
+  note?: string;
 }
 
 export interface Group {
@@ -135,6 +184,9 @@ interface AppState {
   reports: CitizenReport[];
   sosSessions: DistressSession[];
   responders: Responder[];
+  users: AppUser[];
+  zones: EmergencyZone[];
+  volunteerEvents: VolunteerEvent[];
   cases: CaseRoom[];
   chat: ChatEntry[];
   sources: SourceHealth[];
@@ -162,7 +214,15 @@ interface AppState {
   cancelSos: (sosId: string) => void;
 
   declareIncident: (e: Omit<CanonicalEvent, 'id' | 'createdAt' | 'status'>) => string;
+  declareZone: (z: Omit<EmergencyZone, 'id' | 'createdAt' | 'status'>) => string;
+  updateZoneStatus: (zoneId: string, status: EmergencyZone['status']) => void;
+  assignIncident: (eventId: string, responderId: string) => void;
   toggleDuty: (responderId: string, on: boolean) => void;
+  updateResponderStatus: (responderId: string, status: Responder['status']) => void;
+  updateSelfProfile: (patch: Partial<AppUser>) => void;
+  updateUserProfile: (userId: string, patch: Partial<AppUser>) => void;
+  createVolunteerEvent: (e: Omit<VolunteerEvent, 'id' | 'createdAt' | 'registeredResponderIds' | 'status'>) => string;
+  joinVolunteerEvent: (eventId: string, responderId: string) => void;
 
   sendChat: (caseId: string, authorId: string, text: string) => void;
   askHost: (caseId: string, query: string) => void;
@@ -177,6 +237,7 @@ const AppContext = createContext<AppState | undefined>(undefined);
 
 const NOW = Date.now();
 const T = (mins: number) => NOW - mins * 60_000;
+const SELF_ID = 'R-ECHO-1';
 
 // Seed locations are real SG coords
 const seed = {
@@ -344,6 +405,78 @@ const seed = {
     },
   ] as Responder[],
 
+  users: [
+    {
+      id: 'U-CIV-1',
+      username: 'maya',
+      displayName: 'Maya Tan',
+      phone: '+65 8123 4567',
+      primaryRole: 'citizen',
+      address: 'Bedok North, Singapore',
+      skills: ['Community reporting'],
+      available: true,
+    },
+    {
+      id: SELF_ID,
+      username: 'echo1',
+      displayName: 'Echo-1 Responder',
+      phone: '+65 8450 1101',
+      primaryRole: 'responder',
+      secondaryRole: 'citizen',
+      address: 'Central Singapore',
+      skills: ['First Aid', 'CPR', 'AED', 'Search'],
+      available: true,
+    },
+    {
+      id: 'U-OPS-1',
+      username: 'opslead',
+      displayName: 'Ops Lead',
+      phone: '+65 9000 0001',
+      primaryRole: 'ops',
+      secondaryRole: 'citizen',
+      address: 'HQ Operations',
+      skills: ['Dispatch', 'Incident command'],
+      available: true,
+    },
+  ] as AppUser[],
+
+  zones: [
+    {
+      id: 'ZONE-BEDOK-01',
+      title: 'Bedok South flood watch',
+      kind: 'flood',
+      severity: 3 as SeverityLevel,
+      status: 'declared',
+      description: 'Drawn operating area for road flooding and pedestrian diversion.',
+      center: { lng: 103.93, lat: 1.322 },
+      area: [
+        { lng: 103.918, lat: 1.318 },
+        { lng: 103.942, lat: 1.318 },
+        { lng: 103.942, lat: 1.328 },
+        { lng: 103.918, lat: 1.328 },
+      ],
+      declaredBy: 'U-OPS-1',
+      createdAt: T(20),
+    },
+  ] as EmergencyZone[],
+
+  volunteerEvents: [
+    {
+      id: 'VOL-AED-01',
+      title: 'AED refresher standby',
+      category: 'first_aid_training',
+      description: 'Short refresher and standby roster for nearby AED responders.',
+      location: { lng: 103.85, lat: 1.3 },
+      venue: 'City Hall community room',
+      organizer: 'Ops Lead',
+      date: new Date(NOW + 86_400_000).toISOString().slice(0, 10),
+      status: 'upcoming',
+      skillsNeeded: ['AED', 'CPR'],
+      registeredResponderIds: ['R-ECHO-1'],
+      createdAt: T(40),
+    },
+  ] as VolunteerEvent[],
+
   cases: [
     {
       id: 'CASE-ALPHA-09',
@@ -404,10 +537,50 @@ const seed = {
     { id: 'src-5', name: 'MOH alerts', state: 'fresh', lastAgeS: 90 },
     { id: 'src-6', name: 'OneMap traffic', state: 'stale', lastAgeS: 540 },
     { id: 'src-7', name: 'Reports intake', state: 'fresh', lastAgeS: 5 },
+    {
+      id: 'src-8',
+      name: 'Quick Aid backend',
+      state: 'shell_only',
+      lastAgeS: 0,
+      note: 'Express/WebSocket persistence not wired yet.',
+    },
+    {
+      id: 'src-9',
+      name: 'MQTT bridge',
+      state: 'not_configured',
+      lastAgeS: 0,
+      note: 'Mosquitto bridge is planned but not connected in shell phase.',
+    },
+    {
+      id: 'src-10',
+      name: 'OpenRouter Host AI',
+      state: 'not_configured',
+      lastAgeS: 0,
+      note: 'Requires OPENROUTER_API_KEY and backend /api/host/ask.',
+    },
+    {
+      id: 'src-11',
+      name: 'LTA DataMall',
+      state: 'not_configured',
+      lastAgeS: 0,
+      note: 'Requires DATAMALL_ACCOUNT_KEY before traffic incidents/speed bands are live.',
+    },
+    {
+      id: 'src-12',
+      name: 'OneMap API services',
+      state: 'not_configured',
+      lastAgeS: 0,
+      note: 'Tiles are live. Reverse geocode/routes/themes need ONEMAP_API_KEY.',
+    },
+    {
+      id: 'src-13',
+      name: 'Hospital load',
+      state: 'unavailable',
+      lastAgeS: 0,
+      note: 'No real live hospital-load source configured. No fake values shown.',
+    },
   ] as SourceHealth[],
 };
-
-const SELF_ID = 'R-ECHO-1';
 
 export const AppProvider = ({ children }: { children: ReactNode }) => {
   const [role, setRole] = useState<Role>('citizen');
@@ -418,6 +591,9 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   const [reports, setReports] = useState<CitizenReport[]>(seed.reports);
   const [sosSessions, setSosSessions] = useState<DistressSession[]>(seed.sosSessions);
   const [responders, setResponders] = useState<Responder[]>(seed.responders);
+  const [users, setUsers] = useState<AppUser[]>(seed.users);
+  const [zones, setZones] = useState<EmergencyZone[]>(seed.zones);
+  const [volunteerEvents, setVolunteerEvents] = useState<VolunteerEvent[]>(seed.volunteerEvents);
   const [cases, setCases] = useState<CaseRoom[]>(seed.cases);
   const [chat, setChat] = useState<ChatEntry[]>(seed.chat);
   const [sources] = useState<SourceHealth[]>(seed.sources);
@@ -582,9 +758,105 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     return id;
   };
 
+  const declareZone: AppState['declareZone'] = (z) => {
+    const id = newId('ZONE');
+    const zone: EmergencyZone = { ...z, id, status: 'declared', createdAt: Date.now() };
+    setZones((prev) => [zone, ...prev]);
+    setEvents((prev) => [
+      {
+        id: newId('EV'),
+        kind: z.kind === 'accident' ? 'crash' : z.kind === 'health' ? 'medical' : z.kind,
+        title: z.title,
+        severity: z.severity,
+        status: 'verified',
+        location: z.center,
+        area: z.area,
+        source: 'ops zone declaration',
+        createdAt: Date.now(),
+      },
+      ...prev,
+    ]);
+    return id;
+  };
+
+  const updateZoneStatus: AppState['updateZoneStatus'] = (zoneId, status) =>
+    setZones((prev) => prev.map((z) => (z.id === zoneId ? { ...z, status } : z)));
+
+  const assignIncident: AppState['assignIncident'] = (eventId, responderId) => {
+    const event = events.find((e) => e.id === eventId);
+    if (!event) return;
+    const responder = responders.find((r) => r.id === responderId);
+    const caseId = event.caseId ?? newId('CASE');
+    if (!event.caseId) {
+      setCases((prev) => [
+        {
+          id: caseId,
+          name: caseId.replace('CASE-', ''),
+          severity: event.severity,
+          centroid: event.location,
+          members: [responderId],
+          captain: responderId,
+          state: 'forming',
+          startedAt: Date.now(),
+        },
+        ...prev,
+      ]);
+      setEvents((prev) => prev.map((e) => (e.id === eventId ? { ...e, caseId } : e)));
+    } else {
+      setCases((prev) =>
+        prev.map((c) =>
+          c.id === caseId && !c.members.includes(responderId)
+            ? { ...c, members: [...c.members, responderId] }
+            : c
+        )
+      );
+    }
+    setResponders((prev) =>
+      prev.map((r) => (r.id === responderId ? { ...r, status: 'en_route' } : r))
+    );
+    setChat((prev) => [
+      ...prev,
+      {
+        id: newId('CH'),
+        caseId,
+        authorId: 'ops',
+        kind: 'system',
+        text: `${responder?.name ?? responderId} assigned to ${event.title}.`,
+        ts: Date.now(),
+      },
+    ]);
+  };
+
   const toggleDuty: AppState['toggleDuty'] = (responderId, on) =>
     setResponders((prev) =>
       prev.map((r) => (r.id === responderId ? { ...r, status: on ? 'ready' : 'out' } : r))
+    );
+
+  const updateResponderStatus: AppState['updateResponderStatus'] = (responderId, status) =>
+    setResponders((prev) => prev.map((r) => (r.id === responderId ? { ...r, status } : r)));
+
+  const updateSelfProfile: AppState['updateSelfProfile'] = (patch) =>
+    setUsers((prev) => prev.map((u) => (u.id === SELF_ID ? { ...u, ...patch } : u)));
+
+  const updateUserProfile: AppState['updateUserProfile'] = (userId, patch) =>
+    setUsers((prev) => prev.map((u) => (u.id === userId ? { ...u, ...patch } : u)));
+
+  const createVolunteerEvent: AppState['createVolunteerEvent'] = (e) => {
+    const id = newId('VOL');
+    setVolunteerEvents((prev) => [
+      { ...e, id, registeredResponderIds: [], status: 'upcoming', createdAt: Date.now() },
+      ...prev,
+    ]);
+    return id;
+  };
+
+  const joinVolunteerEvent: AppState['joinVolunteerEvent'] = (eventId, responderId) =>
+    setVolunteerEvents((prev) =>
+      prev.map((e) =>
+        e.id === eventId && !e.registeredResponderIds.includes(responderId)
+          ? { ...e, registeredResponderIds: [...e.registeredResponderIds, responderId] }
+          : e
+      )
     );
 
   const sendChat: AppState['sendChat'] = (caseId, authorId, text) => {
@@ -719,6 +991,9 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     reports,
     sosSessions,
     responders,
+    users,
+    zones,
+    volunteerEvents,
     cases,
     chat,
     sources,
@@ -741,7 +1016,15 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     advanceSos,
     cancelSos,
     declareIncident,
+    declareZone,
+    updateZoneStatus,
+    assignIncident,
     toggleDuty,
+    updateResponderStatus,
+    updateSelfProfile,
+    updateUserProfile,
+    createVolunteerEvent,
+    joinVolunteerEvent,
     sendChat,
     askHost,
     joinGroup,

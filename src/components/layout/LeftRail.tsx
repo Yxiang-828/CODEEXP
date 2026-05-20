@@ -1,4 +1,5 @@
 import { useAppContext } from '../../AppContext';
+import type React from 'react';
 import {
   ClipboardList,
   Users,
@@ -10,6 +11,7 @@ import {
   Activity,
   Crown,
   UsersRound,
+  ClipboardCheck,
 } from 'lucide-react';
 
 export default function LeftRail() {
@@ -31,6 +33,7 @@ export default function LeftRail() {
   const responderQueues = [
     { icon: Map, label: 'Bulletin', count: 5, action: () => setDrawerContent('mission_board') },
     { icon: ClipboardList, label: 'Assignments', count: 1, action: () => setDrawerContent('assignment_detail') },
+    { icon: Radio, label: 'Joinable', action: () => setDrawerContent('joinable_missions') },
     {
       icon: ShieldAlert,
       label: 'Verify',
@@ -38,6 +41,7 @@ export default function LeftRail() {
       action: () => setDrawerContent('verify'),
     },
     { icon: UsersRound, label: 'Groups', count: self?.groups.length ?? 0, action: () => setDrawerContent('groups') },
+    { icon: Plus, label: 'Events', action: () => setDrawerContent('volunteer_events') },
   ];
 
   const opsQueues = [
@@ -47,6 +51,7 @@ export default function LeftRail() {
       count: reports.filter((r) => r.status === 'pending' || r.status === 'claimed').length,
       action: () => setDrawerContent('report_queue'),
     },
+    { icon: Map, label: 'Zones', action: () => setDrawerContent('zones') },
     {
       icon: Radio,
       label: 'Distress',
@@ -55,6 +60,7 @@ export default function LeftRail() {
     },
     { icon: ClipboardList, label: 'Cases', count: cases.length, action: () => setDrawerContent('case_oversight') },
     { icon: Users, label: 'Roster', action: () => setDrawerContent('responder_oversight') },
+    { icon: ClipboardCheck, label: 'Truth', action: () => setDrawerContent('readiness') },
   ];
 
   const queues = role === 'responder' ? responderQueues : opsQueues;
@@ -109,7 +115,7 @@ export default function LeftRail() {
             </div>
           </div>
           <div className="flex flex-col gap-1 p-2">
-            <RoomRow label="General" count={0} onClick={() => undefined} />
+            <RoomRow label="General" count={0} onClick={() => setDrawerContent('mission_board')} />
             {self?.groups.map((gid) => {
               const g = groups.find((x) => x.id === gid);
               if (!g) return null;
@@ -156,6 +162,7 @@ function RoomRow({
   isCase = false,
   onClick,
 }: {
+  key?: React.Key;
   label: string;
   count: number;
   active?: boolean;

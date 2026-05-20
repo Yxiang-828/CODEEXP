@@ -1,3 +1,5 @@
+import type React from 'react';
+
 import {
   LocalAlertDetail,
   IncidentGuidance,
@@ -15,6 +17,9 @@ import {
   MissionBoard,
   CaseLobby,
   GroupsWorkspace,
+  ProfileWorkspace,
+  VolunteerEvents,
+  JoinableMissions,
 } from './ResponderWorkspaces';
 import {
   DeclareIncident,
@@ -26,6 +31,8 @@ import {
   ResponderOversight,
   SourceHealth,
   IncidentOps,
+  ZoneManager,
+  ReadinessReport,
 } from './OpsWorkspaces';
 
 const REGISTRY: Record<string, () => React.JSX.Element> = {
@@ -43,6 +50,9 @@ const REGISTRY: Record<string, () => React.JSX.Element> = {
   mission_board: MissionBoard,
   case_lobby: CaseLobby,
   groups: GroupsWorkspace,
+  profile: ProfileWorkspace,
+  volunteer_events: VolunteerEvents,
+  joinable_missions: JoinableMissions,
   declare: DeclareIncident,
   incident_ops: IncidentOps,
   dispatch: DispatchResponder,
@@ -52,6 +62,8 @@ const REGISTRY: Record<string, () => React.JSX.Element> = {
   case_oversight: CaseOversight,
   responder_oversight: ResponderOversight,
   source_health: SourceHealth,
+  zones: ZoneManager,
+  readiness: ReadinessReport,
 };
 
 export default function WorkspaceContent({ id }: { id: string }) {

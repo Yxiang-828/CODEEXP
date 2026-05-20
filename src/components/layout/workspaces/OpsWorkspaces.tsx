@@ -1,10 +1,12 @@
 import { useState } from 'react';
-import { Megaphone, Eye, AlertOctagon, CheckCircle2 } from 'lucide-react';
+import type React from 'react';
+import { Megaphone, Eye, AlertOctagon, CheckCircle2, MapPinned, Archive, ClipboardCheck } from 'lucide-react';
 import { useAppContext } from '../../../AppContext';
 import SeverityChip from '../../primitives/SeverityChip';
 import RolePreviewTabs from '../../primitives/RolePreviewTabs';
 import CoveragePreview from '../../primitives/CoveragePreview';
 import type { SeverityLevel } from '../../primitives/SeverityChip';
+import { polygonCenter, radialPolygon } from '../../../utils/geo';
 
 export function DeclareIncident() {
   const { declareIncident, setDrawerContent } = useAppContext();
@@ -222,17 +224,38 @@ export function IncidentOps() {
 }
 
 export function DispatchResponder() {
-  const { responders, sosSessions, assignSos, setDrawerContent } = useAppContext();
+  const { responders, sosSessions, events, assignSos, assignIncident, setDrawerContent } = useAppContext();
   const pending = sosSessions.find((s) => s.status === 'requesting');
+  const assignableEvents = events.filter((e) => e.status === 'verified' && e.kind !== 'weather');
   const available = responders.filter((r) => r.status === 'ready');
+  const [target, setTarget] = useState(pending ? `sos:${pending.id}` : assignableEvents[0] ? `event:${assignableEvents[0].id}` : '');
+  const selectedSos = target.startsWith('sos:') ? sosSessions.find((s) => s.id === target.slice(4)) : null;
+  const selectedEvent = target.startsWith('event:') ? events.find((e) => e.id === target.slice(6)) : null;
   return (
     <div className="p-5 flex flex-col gap-3">
       <h2 className="text-xl font-serif italic font-black">Dispatch</h2>
-      {pending ? (
+      {pending || assignableEvents.length > 0 ? (
         <>
           <Card>
-            <strong className="block uppercase text-[10px] tracking-widest mb-1">Target</strong>
-            {pending.id} · {pending.category}
+            <strong className="block uppercase text-[10px] tracking-widest mb-2">Assign to mission</strong>
+            <select
+              value={target}
+              onChange={(e) => setTarget(e.target.value)}
+              className="w-full p-2 border border-border-strong bg-surface-0 text-[10px] uppercase font-bold tracking-widest outline-none"
+            >
+              {sosSessions
+                .filter((s) => !['resolved', 'cancelled'].includes(s.status))
+                .map((s) => (
+                  <option key={s.id} value={`sos:${s.id}`}>
+                    SOS · {s.id} · {s.category}
+                  </option>
+                ))}
+              {assignableEvents.map((e) => (
+                <option key={e.id} value={`event:${e.id}`}>
+                  Incident · {e.title}
+                </option>
+              ))}
+            </select>
           </Card>
           <h3 className="text-[10px] uppercase font-bold tracking-widest">Available roster</h3>
           {available.map((r) => (
@@ -250,7 +273,8 @@ export function DispatchResponder() {
               </div>
               <button
                 onClick={() => {
-                  assignSos(pending.id, r.id);
+                  if (selectedSos) assignSos(selectedSos.id, r.id);
+                  if (selectedEvent) assignIncident(selectedEvent.id, r.id);
                   setDrawerContent(null);
                 }}
                 className="bg-surface-3 text-text-inverse px-3 py-1 text-[9px] font-bold uppercase tracking-widest border border-border-strong shadow-[2px_2px_0_rgba(26,26,26,1)]"
@@ -261,13 +285,14 @@ export function DispatchResponder() {
           ))}
         </>
       ) : (
-        <Card>No pending distress. Dispatch is idle.</Card>
+        <Card>No SOS or incident target is waiting for dispatch.</Card>
       )}
     </div>
   );
 }
 
 export function BroadcastComposer() {
+  const [sentAt, setSentAt] = useState<number | null>(null);
   return (
     <div className="p-5 flex flex-col gap-3">
       <h2 className="text-xl font-serif italic font-black">Geo broadcast</h2>
@@ -285,9 +310,17 @@ export function BroadcastComposer() {
           defaultValue="Heavy flooding at Bedok South Rd. Avoid area. Stay clear of moving water."
         />
       </Field>
-      <button className="bg-accent-critical text-text-inverse py-3 text-[10px] uppercase font-bold tracking-widest border border-border-strong shadow-[3px_3px_0_rgba(26,26,26,1)] flex items-center justify-center gap-2">
+      {sentAt && (
+        <Card>
+          Broadcast queued locally at {new Date(sentAt).toLocaleTimeString('en-SG', { hour: '2-digit', minute: '2-digit' })}. Backend delivery will replace this local queue.
+        </Card>
+      )}
+      <button
+        onClick={() => setSentAt(Date.now())}
+        className="bg-accent-critical text-text-inverse py-3 text-[10px] uppercase font-bold tracking-widest border border-border-strong shadow-[3px_3px_0_rgba(26,26,26,1)] flex items-center justify-center gap-2"
+      >
         <Megaphone className="w-3 h-3" />
-        Send broadcast
+        {sentAt ? 'Broadcast queued' : 'Send broadcast'}
       </button>
     </div>
   );
@@ -315,6 +348,14 @@ export function ReportQueue() {
             </div>
             <h3 className="text-[11px] font-bold uppercase tracking-widest mb-1">{r.title}</h3>
             <p className="text-[10px]">{r.body}</p>
+            <div className="mt-2 bg-surface-2 border border-border-strong p-2">
+              <div className="text-[9px] uppercase font-black tracking-widest text-text-secondary">
+                Ops review
+              </div>
+              <div className="mt-1 text-[10px] uppercase tracking-widest">
+                Status {r.status} {r.claimedBy ? `· claimed by ${r.claimedBy}` : '· unclaimed'}
+              </div>
+            </div>
             <div className="flex gap-1 mt-2">
               <button
                 onClick={() => claimReport(r.id, 'ops')}
@@ -334,6 +375,74 @@ export function ReportQueue() {
                 className="flex-1 bg-surface-0 py-1.5 text-[9px] uppercase font-bold tracking-widest border border-border-strong"
               >
                 Dismiss
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+export function ZoneManager() {
+  const { zones, updateZoneStatus, declareZone } = useAppContext();
+  const createZone = () => {
+    const area = radialPolygon({ lng: 103.85, lat: 1.3 }, 0.35, 8);
+    declareZone({
+      title: 'New drawn operating zone',
+      kind: 'hazard',
+      severity: 2,
+      description: 'Shell-created zone. Backend map drawing will provide exact geometry.',
+      center: polygonCenter(area),
+      area,
+      declaredBy: 'ops',
+    });
+  };
+  return (
+    <div className="flex flex-col h-full">
+      <div className="p-4 border-b border-border-strong">
+        <h2 className="text-xl font-serif italic font-black flex items-center gap-2">
+          <MapPinned className="w-4 h-4" />
+          Emergency zones
+        </h2>
+        <p className="text-[10px] uppercase font-bold tracking-widest text-text-secondary">
+          {zones.length} zones · drawn-area shell ready
+        </p>
+      </div>
+      <div className="p-3 border-b border-border-strong">
+        <button
+          onClick={createZone}
+          className="w-full bg-surface-3 text-text-inverse py-3 text-[10px] uppercase font-bold tracking-widest border border-border-strong shadow-[3px_3px_0_rgba(26,26,26,1)]"
+        >
+          Create demo drawn zone
+        </button>
+      </div>
+      <div className="flex-1 overflow-y-auto">
+        {zones.map((z) => (
+          <div key={z.id} className="p-3 border-b border-border-strong">
+            <div className="flex items-center gap-2">
+              <SeverityChip level={z.severity} />
+              <div className="flex-1 min-w-0">
+                <div className="text-[11px] uppercase font-bold tracking-widest truncate">{z.title}</div>
+                <div className="text-[9px] uppercase tracking-widest text-text-secondary">
+                  {z.kind} · {z.status} · {z.area.length} points
+                </div>
+              </div>
+            </div>
+            <p className="text-[10px] mt-2 leading-relaxed">{z.description}</p>
+            <div className="flex gap-1 mt-2">
+              <button
+                onClick={() => updateZoneStatus(z.id, 'declared')}
+                className="flex-1 bg-accent-success text-surface-3 py-1.5 text-[9px] uppercase font-bold tracking-widest border border-border-strong"
+              >
+                Declare
+              </button>
+              <button
+                onClick={() => updateZoneStatus(z.id, 'archived')}
+                className="flex-1 bg-surface-0 py-1.5 text-[9px] uppercase font-bold tracking-widest border border-border-strong"
+              >
+                <Archive className="w-3 h-3 inline mr-1" />
+                Archive
               </button>
             </div>
           </div>
@@ -421,7 +530,7 @@ export function CaseOversight() {
 }
 
 export function ResponderOversight() {
-  const { responders } = useAppContext();
+  const { responders, updateResponderStatus, users } = useAppContext();
   return (
     <div className="flex flex-col h-full">
       <div className="p-4 border-b border-border-strong">
@@ -451,7 +560,21 @@ export function ResponderOversight() {
               <div className="text-[9px] uppercase tracking-widest text-text-secondary">
                 {r.role} · {r.status}
               </div>
+              <div className="text-[9px] uppercase tracking-widest text-text-secondary">
+                {users.find((u) => u.id === r.id)?.skills.join(' · ') || 'profile pending'}
+              </div>
             </div>
+            <select
+              value={r.status}
+              onChange={(e) => updateResponderStatus(r.id, e.target.value as typeof r.status)}
+              className="bg-surface-0 border border-border-strong text-[9px] uppercase font-bold tracking-widest p-1"
+            >
+              {['ready', 'en_route', 'on_scene', 'out', 'offline'].map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
+            </select>
           </div>
         ))}
       </div>
@@ -480,6 +603,8 @@ export function SourceHealth() {
                   ? 'bg-accent-success'
                   : s.state === 'stale'
                   ? 'bg-accent-warning'
+                  : s.state === 'shell_only'
+                  ? 'bg-accent-info'
                   : 'bg-accent-critical'
               }`}
             />
@@ -488,7 +613,103 @@ export function SourceHealth() {
               <div className="text-[9px] uppercase tracking-widest text-text-secondary">
                 {s.state} · last {s.lastAgeS}s ago
               </div>
+              {s.note && <div className="text-[10px] leading-relaxed mt-1">{s.note}</div>}
             </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+export function ReadinessReport() {
+  const items = [
+    {
+      state: 'ready',
+      title: 'Role shell and navigation',
+      detail: 'Citizen, responder, and ops drawers are wired through the root shell.',
+    },
+    {
+      state: 'ready',
+      title: 'Citizen intake shell',
+      detail: 'SOS, emergency form, voice-prepared report, photo marker, and volunteer/community request flows exist.',
+    },
+    {
+      state: 'ready',
+      title: 'Ops command shell',
+      detail: 'Report queue, distress oversight, case oversight, zones, dispatch, broadcast, roster, and source health are reachable.',
+    },
+    {
+      state: 'ready',
+      title: 'Responder shell',
+      detail: 'Duty, verify queue, assignment detail, case room, groups, volunteer events, and profile are reachable.',
+    },
+    {
+      state: 'ready',
+      title: 'Template algorithm ports',
+      detail: 'Distance sorting, nearby filtering, ETA derivation, polygon center, and radial zone generation are now root-native helpers.',
+    },
+    {
+      state: 'live',
+      title: 'Map + NEA feeds',
+      detail: 'MapLibre/OneMap tiles and NEA PSI/rainfall/forecast are the live client-side data currently wired.',
+    },
+    {
+      state: 'shell_only',
+      title: 'Persistence and realtime',
+      detail: 'State is still in AppContext. Backend/WebSocket/MQTT are explicit next step, not secretly implemented.',
+    },
+    {
+      state: 'shell_only',
+      title: 'Voice and photo processing',
+      detail: 'Voice transcripts and photo evidence markers are usable shell data. Backend media storage is the next integration layer.',
+    },
+    {
+      state: 'not_configured',
+      title: 'OpenRouter Host AI',
+      detail: 'Host remains command-shaped shell logic until OPENROUTER_API_KEY and backend route exist.',
+    },
+    {
+      state: 'not_configured',
+      title: 'LTA DataMall and OneMap APIs',
+      detail: 'Traffic incidents/speed bands, reverse geocode, routes, and themes require configured keys.',
+    },
+    {
+      state: 'unavailable',
+      title: 'Hospital load',
+      detail: 'No live source is configured. The shell must show unavailable instead of fake wait times.',
+    },
+  ];
+  return (
+    <div className="flex flex-col h-full">
+      <div className="p-4 border-b border-border-strong">
+        <h2 className="text-xl font-serif italic font-black flex items-center gap-2">
+          <ClipboardCheck className="w-4 h-4" />
+          Shell readiness
+        </h2>
+        <p className="text-[10px] uppercase font-bold tracking-widest text-text-secondary">
+          Truth report · live vs shell-only vs blocked
+        </p>
+      </div>
+      <div className="flex-1 overflow-y-auto">
+        {items.map((item) => (
+          <div key={item.title} className="p-3 border-b border-border-strong">
+            <div className="flex items-center gap-2">
+              <span
+                className={`w-2 h-2 border border-border-strong ${
+                  item.state === 'ready' || item.state === 'live'
+                    ? 'bg-accent-success'
+                    : item.state === 'shell_only'
+                    ? 'bg-accent-info'
+                    : 'bg-accent-critical'
+                }`}
+              />
+              <span className="text-[9px] uppercase font-mono font-bold border border-border-strong px-1.5 bg-surface-2">
+                {item.state}
+              </span>
+              <h3 className="text-[11px] uppercase font-black tracking-widest">{item.title}</h3>
+            </div>
+            <p className="text-[10px] leading-relaxed mt-2">{item.detail}</p>
           </div>
         ))}
       </div>
