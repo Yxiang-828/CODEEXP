@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kampung Kaki Architecture</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/devicons/devicon@latest/devicon.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        :root {
+            --bg-color: #fafafa;
+            --text-color: #111;
+            --border-color: #000;
+            --shadow-color: #000;
+            --band-bg: #f0f0f0;
+            --service-bg: #fff;
+            --cluster-bg: #ffeef0; /* Tinted red for state */
+            --external-bg: #e9ecef; /* Muted fill */
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            padding: 40px 20px;
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .architecture-container {
+            max-width: 1000px;
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            gap: 30px;
+        }
+
+        /* Bands */
+        .band {
+            border: 2px dashed #ccc;
+            background-color: var(--band-bg);
+            padding: 40px 20px 20px 20px;
+            position: relative;
+            border-radius: 8px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px;
+            justify-content: center;
+        }
+
+        .band-label {
+            position: absolute;
+            top: 10px;
+            left: 15px;
+            font-weight: 800;
+            text-transform: uppercase;
+            font-size: 0.85rem;
+            color: #555;
+            letter-spacing: 1px;
+        }
+
+        /* Services (Brutalist panel) */
+        .node {
+            background-color: var(--service-bg);
+            border: 2px solid var(--border-color);
+            box-shadow: 4px 4px 0px var(--shadow-color);
+            padding: 15px 20px;
+            border-radius: 4px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            text-align: center;
+            min-width: 140px;
+            transition: transform 0.1s ease;
+        }
+
+        .node:hover {
+            transform: translate(-2px, -2px);
+            box-shadow: 6px 6px 0px var(--shadow-color);
+        }
+
+        .node i {
+            font-size: 2rem;
+            margin-bottom: 10px;
+        }
+
+        .node-title {
+            font-weight: 700;
+            font-size: 0.95rem;
+            margin-bottom: 5px;
+        }
+
+        .node-desc {
+            font-size: 0.75rem;
+            color: #666;
+        }
+
+        /* Clusters Specific */
+        .node.cluster {
+            background-color: var(--cluster-bg);
+            border-color: #d90429;
+            box-shadow: 4px 4px 0px #d90429;
+        }
+
+        .cluster-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 15px;
+            width: 100%;
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 2px solid #ccc;
+        }
+
+        /* External Specific */
+        .node.external {
+            background-color: var(--external-bg);
+            border: 2px dashed #666;
+            box-shadow: none;
+        }
+
+        .node.external:hover {
+            transform: none;
+            box-shadow: 4px 4px 0px #ccc;
+        }
+
+        /* Core Section special layout */
+        .core-services {
+            display: flex;
+            width: 100%;
+            justify-content: center;
+            gap: 40px;
+            margin-bottom: 10px;
+        }
+
+    </style>
+</head>
+<body>
+
+    <div class="architecture-container">
+        
+        <div class="band">
+            <div class="band-label">Clients · Same React SPA, Role-Scoped</div>
+            <div class="node">
+                <i class="devicon-react-original colored"></i>
+                <div class="node-title">Citizen</div>
+                <div class="node-desc">Role-scoped chrome</div>
+            </div>
+            <div class="node">
+                <i class="devicon-react-original colored"></i>
+                <div class="node-title">Responder</div>
+                <div class="node-desc">Role-scoped chrome</div>
+            </div>
+            <div class="node">
+                <i class="devicon-react-original colored"></i>
+                <div class="node-title">Ops</div>
+                <div class="node-desc">Role-scoped chrome</div>
+            </div>
+        </div>
+
+        <div class="band">
+            <div class="band-label">Edge · Vercel Functions (Stateless)</div>
+            <div class="node">
+                <i class="devicon-vercel-original"></i>
+                <div class="node-title">host / ask</div>
+                <div class="node-desc">AI routing</div>
+            </div>
+            <div class="node">
+                <i class="devicon-vercel-original"></i>
+                <div class="node-title">host / tools</div>
+                <div class="node-desc">Grounded tools</div>
+            </div>
+            <div class="node">
+                <i class="fa-solid fa-map-location-dot" style="color: #007bff;"></i>
+                <div class="node-title">live / maps & rgeo</div>
+                <div class="node-desc">Layers & Reverse Geo</div>
+            </div>
+            <div class="node">
+                <i class="fa-solid fa-cloud-sun-rain" style="color: #6f42c1;"></i>
+                <div class="node-title">live / snapshot</div>
+                <div class="node-desc">Cached edge data</div>
+            </div>
+        </div>
+
+        <div class="band">
+            <div class="band-label">Core · The CSOT (Canonical State of Truth)</div>
+            
+            <div class="core-services">
+                <div class="node">
+                    <i class="fa-solid fa-network-wired" style="color: #e63946;"></i>
+                    <div class="node-title">Mosquitto MQTT 5</div>
+                    <div class="node-desc">QoS-1 · Retained · LWT</div>
+                </div>
+                <div class="node">
+                    <i class="devicon-redis-plain colored"></i>
+                    <div class="node-title">Redis Bridge</div>
+                    <div class="node-desc">State + Pub/Sub</div>
+                </div>
+            </div>
+
+            <div class="cluster-grid">
+                <div class="node cluster">
+                    <i class="fa-solid fa-inbox"></i>
+                    <div class="node-title">Intake</div>
+                    <div class="node-desc">Low trust signals</div>
+                </div>
+                <div class="node cluster">
+                    <i class="fa-solid fa-triangle-exclamation"></i>
+                    <div class="node-title">Incidents</div>
+                    <div class="node-desc">Verified events</div>
+                </div>
+                <div class="node cluster">
+                    <i class="fa-solid fa-truck-medical"></i>
+                    <div class="node-title">Operations</div>
+                    <div class="node-desc">Live response & cases</div>
+                </div>
+                <div class="node cluster">
+                    <i class="fa-solid fa-users"></i>
+                    <div class="node-title">Network</div>
+                    <div class="node-desc">Identity & groups</div>
+                </div>
+                <div class="node cluster">
+                    <i class="fa-solid fa-tower-cell"></i>
+                    <div class="node-title">Intel</div>
+                    <div class="node-desc">Logs & source health</div>
+                </div>
+                <div class="node cluster">
+                    <i class="fa-solid fa-display"></i>
+                    <div class="node-title">Presentation</div>
+                    <div class="node-desc">Shell state (ephemeral)</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="band">
+            <div class="band-label">Workers · Background Ingest</div>
+            <div class="node">
+                <i class="fa-brands fa-telegram" style="color: #2481cc;"></i>
+                <div class="node-title">Telethon Scraper</div>
+                <div class="node-desc">Gov.sg / SCDF ingestion</div>
+            </div>
+            <div class="node">
+                <i class="fa-solid fa-clock-rotate-left" style="color: #28a745;"></i>
+                <div class="node-title">HTTP Pollers</div>
+                <div class="node-desc">NEA & LTA feeds</div>
+            </div>
+        </div>
+
+        <div class="band">
+            <div class="band-label">External · Read-Only Providers</div>
+            <div class="node external">
+                <i class="fa-solid fa-robot"></i>
+                <div class="node-title">OpenAI</div>
+            </div>
+            <div class="node external">
+                <i class="fa-solid fa-map"></i>
+                <div class="node-title">OneMap</div>
+            </div>
+            <div class="node external">
+                <i class="fa-solid fa-cloud"></i>
+                <div class="node-title">NEA API</div>
+            </div>
+            <div class="node external">
+                <i class="fa-solid fa-car"></i>
+                <div class="node-title">LTA DataMall</div>
+            </div>
+            <div class="node external">
+                <i class="fa-solid fa-bullhorn"></i>
+                <div class="node-title">Gov.sg Telegram</div>
+            </div>
+        </div>
+
+    </div>
+
+</body>
+</html>

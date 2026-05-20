@@ -128,18 +128,14 @@
     }
     .lane-head p { margin: 0; font-size: 12px; color: #444; max-width: 100ch; }
 
-    .lane-canvas { position: relative; padding: 24px; }
-    .arrows {
-      position: absolute; inset: 0; width: 100%; height: 100%;
-      pointer-events: none; overflow: visible; z-index: 3;
-    }
+    .lane-canvas { padding: 24px 24px 28px; }
     .grid {
-      display: grid;
-      grid-template-columns: repeat(var(--cols, 4), 300px);
-      grid-auto-rows: minmax(380px, auto);
-      gap: 64px 80px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 40px 24px;
       position: relative;
       z-index: 2;
+      align-items: stretch;
     }
 
     .screen {
@@ -149,7 +145,20 @@
       display: flex; flex-direction: column;
       position: relative;
       width: 300px;
+      flex: 0 0 300px;
     }
+    .screen + .screen::before {
+      content: '→';
+      position: absolute;
+      left: -22px;
+      top: 50%;
+      transform: translateY(-50%);
+      font-size: 22px;
+      font-weight: 900;
+      color: var(--ink);
+      pointer-events: none;
+    }
+    .screen.wraps::before { display: none; }
     .screen header {
       padding: 6px 10px;
       border-bottom: 1.5px solid var(--ink);
@@ -200,10 +209,6 @@
     }
     .screen .comments li { margin-bottom: 2px; }
 
-    /* Arrow styling */
-    .arrow-path { fill: none; stroke: var(--ink); stroke-width: 2.4; stroke-linecap: round; }
-    .arrow-head { fill: var(--ink); }
-    .grid { z-index: 1; }
 
     footer.matrix {
       border: 2.5px solid var(--ink);
@@ -303,13 +308,12 @@
   </header>
 
   
-      <section class="lane lane-auth" data-lane="auth" style="--cols:4">
+      <section class="lane lane-auth" data-lane="auth">
         <header class="lane-head">
           <h2><span class="lane-pill">1 · Auth</span></h2>
           <p>Demo accounts gate the shell. Real sign-in is stubbed in this section.</p>
         </header>
         <div class="lane-canvas">
-          <svg class="arrows" aria-hidden="true"></svg>
           <div class="grid">
         <article class="screen" id="auth-login" style="grid-column:1;grid-row:1">
           <header><span class="num">auth-login</span><h3>Demo login</h3></header>
@@ -322,13 +326,12 @@
       </section>
     
 
-      <section class="lane lane-citizen" data-lane="citizen" style="--cols:4">
+      <section class="lane lane-citizen" data-lane="citizen">
         <header class="lane-head">
           <h2><span class="lane-pill">2 · Citizen</span></h2>
           <p>Map → briefing → alerts → report → SOS. AI Kaki is an on-demand side branch from home.</p>
         </header>
         <div class="lane-canvas">
-          <svg class="arrows" aria-hidden="true"></svg>
           <div class="grid">
         <article class="screen" id="cz-home" style="grid-column:1;grid-row:1">
           <header><span class="num">cz-home</span><h3>Citizen home</h3></header>
@@ -389,13 +392,12 @@
       </section>
     
 
-      <section class="lane lane-responder" data-lane="responder" style="--cols:4">
+      <section class="lane lane-responder" data-lane="responder">
         <header class="lane-head">
           <h2><span class="lane-pill">3 · Responder</span></h2>
           <p>Home → mission board → join → copilot. Groups, events, log are side surfaces.</p>
         </header>
         <div class="lane-canvas">
-          <svg class="arrows" aria-hidden="true"></svg>
           <div class="grid">
         <article class="screen" id="rp-home" style="grid-column:1;grid-row:1">
           <header><span class="num">rp-home</span><h3>Responder home</h3></header>
@@ -456,13 +458,12 @@
       </section>
     
 
-      <section class="lane lane-ops" data-lane="ops" style="--cols:4">
+      <section class="lane lane-ops" data-lane="ops">
         <header class="lane-head">
           <h2><span class="lane-pill">4 · Ops</span></h2>
           <p>Triage (reports → distress → cases → roster) → dispatch → declare/broadcast → audit (sources → log). Command copilot sits between dispatch and declare.</p>
         </header>
         <div class="lane-canvas">
-          <svg class="arrows" aria-hidden="true"></svg>
           <div class="grid">
         <article class="screen" id="ops-home" style="grid-column:1;grid-row:1">
           <header><span class="num">ops-home</span><h3>Ops home</h3></header>
@@ -555,13 +556,12 @@
       </section>
     
 
-      <section class="lane lane-godmode" data-lane="godmode" style="--cols:4">
+      <section class="lane lane-godmode" data-lane="godmode">
         <header class="lane-head">
           <h2><span class="lane-pill">5 · God Mode (demo dock)</span></h2>
           <p>CSOT inspector → seed scenarios → source state cycler → AI matrix → CSOT after seed.</p>
         </header>
         <div class="lane-canvas">
-          <svg class="arrows" aria-hidden="true"></svg>
           <div class="grid">
         <article class="screen" id="god-csot" style="grid-column:1;grid-row:1">
           <header><span class="num">god-csot</span><h3>CSOT clusters</h3></header>
@@ -628,73 +628,25 @@
     </p>
   </footer>
 
+  <!-- No arrow JS: tiles are laid out in order via flex-wrap;
+       short → glyphs between consecutive tiles via CSS ::before. -->
   <script>
-    // Forward-only arrows. Two kinds:
-    //   'next' — source and target on the same row: straight horizontal.
-    //   'wrap' — target is on the row below: U-turn around the right edge
-    //            and back to the left to enter the next row.
-    const EDGES = [{"from":"cz-home","to":"cz-brief","kind":"next"},{"from":"cz-brief","to":"cz-alerts","kind":"next"},{"from":"cz-alerts","to":"cz-report","kind":"next"},{"from":"cz-report","to":"cz-sos","kind":"wrap"},{"from":"cz-sos","to":"cz-sos-live","kind":"next"},{"from":"cz-sos-live","to":"cz-ai","kind":"next"},{"from":"rp-home","to":"rp-mboard","kind":"next"},{"from":"rp-mboard","to":"rp-join","kind":"next"},{"from":"rp-join","to":"rp-copilot","kind":"next"},{"from":"rp-copilot","to":"rp-groups","kind":"wrap"},{"from":"rp-groups","to":"rp-events","kind":"next"},{"from":"rp-events","to":"rp-log","kind":"next"},{"from":"ops-home","to":"ops-reports","kind":"next"},{"from":"ops-reports","to":"ops-distress","kind":"next"},{"from":"ops-distress","to":"ops-cases","kind":"next"},{"from":"ops-cases","to":"ops-roster","kind":"wrap"},{"from":"ops-roster","to":"ops-dispatch","kind":"next"},{"from":"ops-dispatch","to":"ops-copilot","kind":"next"},{"from":"ops-copilot","to":"ops-declare","kind":"next"},{"from":"ops-declare","to":"ops-broadcast","kind":"wrap"},{"from":"ops-broadcast","to":"ops-sources","kind":"next"},{"from":"ops-sources","to":"ops-log","kind":"next"},{"from":"god-csot","to":"god-seed","kind":"next"},{"from":"god-seed","to":"god-sources","kind":"next"},{"from":"god-sources","to":"god-matrix","kind":"next"},{"from":"god-matrix","to":"god-seeded","kind":"wrap"}];
-    function rect(el, svg) {
-      const s = svg.getBoundingClientRect();
-      const r = el.getBoundingClientRect();
-      return { left: r.left - s.left, right: r.right - s.left, top: r.top - s.top, bottom: r.bottom - s.top, midX: (r.left + r.right) / 2 - s.left, midY: (r.top + r.bottom) / 2 - s.top };
-    }
-    function nextPath(a, b) {
-      // straight horizontal from a.right to b.left, mid Y of source
-      const x1 = a.right + 6;
-      const y = a.midY;
-      const x2 = b.left - 10;
-      return 'M' + x1 + ',' + y + ' L' + x2 + ',' + y;
-    }
-    function wrapPath(a, b, svgWidth) {
-      // a is at end of its row; b is at start of next row.
-      const x1 = a.right + 6;
-      const y1 = a.midY;
-      const x2 = b.left - 10;
-      const y2 = b.midY;
-      const r = 14;
-      const outX = Math.min(svgWidth - 12, a.right + 40);
-      // right turn down, left turn back
-      return (
-        'M' + x1 + ',' + y1 +
-        ' L' + (outX - r) + ',' + y1 +
-        ' Q' + outX + ',' + y1 + ' ' + outX + ',' + (y1 + r) +
-        ' L' + outX + ',' + (y2 - r) +
-        ' Q' + outX + ',' + y2 + ' ' + (outX - r) + ',' + y2 +
-        ' L' + x2 + ',' + y2
-      );
-    }
-    function drawArrows() {
-      const lanes = document.querySelectorAll('.lane');
-      lanes.forEach((lane) => {
-        const svg = lane.querySelector('svg.arrows');
-        if (!svg) return;
-        svg.innerHTML = '';
-        const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
-        defs.innerHTML = '<marker id="ah-' + lane.dataset.lane + '" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0,0 L10,5 L0,10 Z" class="arrow-head"/></marker>';
-        svg.appendChild(defs);
-      });
-      EDGES.forEach((edge) => {
-        const fromEl = document.getElementById(edge.from);
-        const toEl = document.getElementById(edge.to);
-        if (!fromEl || !toEl) return;
-        const lane = fromEl.closest('.lane');
-        const svg = lane ? lane.querySelector('svg.arrows') : null;
-        if (!svg) return;
-        const svgBox = svg.getBoundingClientRect();
-        const a = rect(fromEl, svg);
-        const b = rect(toEl, svg);
-        const d = edge.kind === 'wrap' ? wrapPath(a, b, svgBox.width) : nextPath(a, b);
-        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-        path.setAttribute('d', d);
-        path.setAttribute('class', 'arrow-path');
-        path.setAttribute('marker-end', 'url(#ah-' + lane.dataset.lane + ')');
-        svg.appendChild(path);
+    // After layout, hide the → glyph on tiles that wrap to the start of a new
+    // row, so we don't get a phantom arrow at the left edge.
+    function hideWrapArrows() {
+      document.querySelectorAll('.grid').forEach((grid) => {
+        const screens = grid.querySelectorAll('.screen');
+        let lastTop = null;
+        screens.forEach((el) => {
+          const top = el.offsetTop;
+          el.classList.toggle('wraps', lastTop !== null && top !== lastTop);
+          lastTop = top;
+        });
       });
     }
-    if (document.readyState === 'complete') drawArrows();
-    else window.addEventListener('load', drawArrows);
-    window.addEventListener('resize', drawArrows);
+    if (document.readyState === 'complete') hideWrapArrows();
+    else window.addEventListener('load', hideWrapArrows);
+    window.addEventListener('resize', hideWrapArrows);
   </script>
 </body>
 </html>

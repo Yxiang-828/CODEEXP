@@ -30,6 +30,7 @@ export default function LeftRail() {
 
   const self = responders.find((r) => r.id === selfResponderId);
   const pendingReports = reports.filter((r) => r.status === 'pending' || r.status === 'claimed').length;
+  const pendingCaseRequests = events.filter((e) => !!e.caseRequestedBy && !e.caseId).length;
 
   const openMissionCount =
     sosSessions.filter((s) => !['resolved', 'cancelled'].includes(s.status)).length +
@@ -53,6 +54,7 @@ export default function LeftRail() {
   const activeMissions = cases.filter((c) => c.state !== 'resolved').length;
   const opsQueues = [
     { icon: ClipboardList, label: 'Reports', count: pendingReports, action: () => setDrawerContent('report_queue') },
+    { icon: Crown, label: 'Requests', count: pendingCaseRequests, action: () => setDrawerContent('case_requests') },
     { icon: Send, label: 'Dispatch', action: () => setDrawerContent('dispatch') },
     { icon: Radio, label: 'Status', count: activeDispatches, action: () => setDrawerContent('distress_oversight') },
     { icon: Users, label: 'Roster', action: () => setDrawerContent('responder_oversight') },

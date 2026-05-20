@@ -154,6 +154,8 @@ interface AppState {
   joinCase: (caseId: string, responderId: string) => void;
   leaveCase: (caseId: string, responderId: string) => void;
   requestCaseFormation: (eventId: string, responderId: string) => void;
+  acceptCaseFormation: (eventId: string) => void;
+  declineCaseFormation: (eventId: string, reason?: string) => void;
   closeCase: (caseId: string, finalReport: string) => void;
   ackNotification: (notificationId: string, actorId: string) => void;
 
@@ -171,6 +173,8 @@ interface AppState {
   // re-creating the full user journey each time.
   godSetSourceState: (sourceId: string, state: SourceHealth['state']) => void;
   godSeedScenario: (kind: 'minor' | 'major') => void;
+  godSeedRoster: () => void;
+  godClearRoster: () => void;
   godResetCsot: () => void;
 }
 
@@ -1278,6 +1282,14 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
 
   const requestCaseFormation: AppState['requestCaseFormation'] = (eventId, responderId) => {
     const event = events.find((e) => e.id === eventId);
+    // Tag the event with the request so the ops Case Requests queue can pick it up.
+    setEvents((prev) =>
+      prev.map((e) =>
+        e.id === eventId
+          ? { ...e, caseRequestedBy: responderId, caseRequestedAt: Date.now() }
+          : e
+      )
+    );
     pushLog({
       actorId: responderId,
       actorRole: 'responder',
@@ -1291,7 +1303,70 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       tier: event && event.severity >= 4 ? 'urgent' : 'watch',
       roles: ['ops'],
       title: 'Responder requested case formation',
-      body: `${event?.title ?? eventId}. Ops must create/assign the case; responders cannot draw their own polygons.`,
+      body: `${event?.title ?? eventId}. Open the Requests queue to form or decline.`,
+      targetId: eventId,
+    });
+  };
+
+  const acceptCaseFormation: AppState['acceptCaseFormation'] = (eventId) => {
+    const event = events.find((e) => e.id === eventId);
+    if (!event || !event.caseRequestedBy) return;
+    const requesterId = event.caseRequestedBy;
+    // assignIncident creates a case keyed to the event and adds the responder
+    // as a member (and captain, since they're the first in). It also fires
+    // the standard notifications + log entries.
+    assignIncident(eventId, requesterId);
+    // Clear the request markers — the case now lives in operations.cases.
+    setEvents((prev) =>
+      prev.map((e) =>
+        e.id === eventId
+          ? { ...e, caseRequestedBy: undefined, caseRequestedAt: undefined }
+          : e
+      )
+    );
+    pushLog({
+      actorId: 'ops',
+      actorRole: 'ops',
+      action: 'case.request_accepted',
+      targetId: eventId,
+      message: `Ops accepted case request from ${requesterId} on ${event.title}.`,
+      severity: event.severity,
+      visibleTo: ['ops', 'responder'],
+    });
+    pushNotification({
+      tier: event.severity >= 4 ? 'urgent' : 'watch',
+      roles: ['responder'],
+      title: 'Case request accepted',
+      body: `Ops formed a case for ${event.title}. You've been added as captain.`,
+      targetId: eventId,
+    });
+  };
+
+  const declineCaseFormation: AppState['declineCaseFormation'] = (eventId, reason) => {
+    const event = events.find((e) => e.id === eventId);
+    if (!event || !event.caseRequestedBy) return;
+    const requesterId = event.caseRequestedBy;
+    setEvents((prev) =>
+      prev.map((e) =>
+        e.id === eventId
+          ? { ...e, caseRequestedBy: undefined, caseRequestedAt: undefined }
+          : e
+      )
+    );
+    pushLog({
+      actorId: 'ops',
+      actorRole: 'ops',
+      action: 'case.request_declined',
+      targetId: eventId,
+      message: `Ops declined case request from ${requesterId} on ${event.title}.${reason ? ' Reason: ' + reason : ''}`,
+      severity: event.severity,
+      visibleTo: ['ops', 'responder'],
+    });
+    pushNotification({
+      tier: 'info',
+      roles: ['responder'],
+      title: 'Case request declined',
+      body: `Ops declined to form a case for ${event.title}.${reason ? ' Reason: ' + reason : ''}`,
       targetId: eventId,
     });
   };
@@ -1484,6 +1559,89 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     });
   };
 
+  // Roster seeding — fills out the responder pool so ops actually has a
+  // dispatchable team. Each responder gets a plausible org, role, status,
+  // location around Singapore, and group memberships matching their capability.
+  const godSeedRoster: AppState['godSeedRoster'] = () => {
+    // Locations spread across the island so distance-based fit scores vary
+    // depending on which incident ops dispatches against.
+    const spread: Array<{ name: string; lng: number; lat: number; org: Responder['org']; role: Responder['role']; unit: 'volunteer' | 'professional'; status: Responder['status']; groups: string[] }> = [
+      { name: 'SCDF-Alpha · Marine Parade',     lng: 103.905, lat: 1.302, org: 'SCDF',      role: 'fire',   unit: 'professional', status: 'ready',   groups: ['G-SCDF-EAST'] },
+      { name: 'SCDF-Bravo · Tampines',          lng: 103.943, lat: 1.353, org: 'SCDF',      role: 'fire',   unit: 'professional', status: 'ready',   groups: ['G-SCDF-EAST'] },
+      { name: 'SCDF-Charlie · Bedok',           lng: 103.929, lat: 1.324, org: 'SCDF',      role: 'search', unit: 'professional', status: 'ready',   groups: ['G-SCDF-EAST'] },
+      { name: 'SCDF Medic · Changi',            lng: 103.989, lat: 1.358, org: 'SCDF',      role: 'medic',  unit: 'professional', status: 'ready',   groups: ['G-SCDF-EAST', 'G-MEDIC-VOL'] },
+      { name: 'SPF Patrol · Bedok',             lng: 103.927, lat: 1.327, org: 'SPF',       role: 'aux',    unit: 'professional', status: 'ready',   groups: [] },
+      { name: 'SPF Patrol · Tampines',          lng: 103.944, lat: 1.349, org: 'SPF',       role: 'aux',    unit: 'professional', status: 'ready',   groups: [] },
+      { name: 'Medic · Dr. Lim',                lng: 103.85,  lat: 1.298, org: 'Medic',     role: 'medic',  unit: 'professional', status: 'ready',   groups: ['G-MEDIC-VOL'] },
+      { name: 'Medic · Dr. Tan',                lng: 103.78,  lat: 1.331, org: 'Medic',     role: 'medic',  unit: 'professional', status: 'ready',   groups: ['G-MEDIC-VOL'] },
+      { name: 'Vol · Auntie Mei (AED)',         lng: 103.94,  lat: 1.353, org: 'Volunteer', role: 'medic',  unit: 'volunteer',    status: 'ready',   groups: ['G-MEDIC-VOL', 'G-AED-RESP'] },
+      { name: 'Vol · Daniel (AED)',             lng: 103.853, lat: 1.302, org: 'Volunteer', role: 'medic',  unit: 'volunteer',    status: 'ready',   groups: ['G-AED-RESP'] },
+      { name: 'Vol · Mr. Tan (Fire Aux)',       lng: 103.79,  lat: 1.281, org: 'Volunteer', role: 'fire',   unit: 'volunteer',    status: 'ready',   groups: ['G-FIRE-VOL'] },
+      { name: 'Vol · Captain Lim (Fire Aux)',   lng: 103.81,  lat: 1.341, org: 'Volunteer', role: 'fire',   unit: 'volunteer',    status: 'standby' as never, groups: ['G-FIRE-VOL'] },
+    ];
+
+    const newResponders: Responder[] = spread.map((s, i) => ({
+      id: `R-DEMO-${(i + 1).toString().padStart(2, '0')}`,
+      name: s.name,
+      org: s.org,
+      role: s.role,
+      // Some statuses (e.g. 'standby') exist in the wireframe vocabulary but
+      // not in the Responder['status'] union — coerce defensively.
+      status: (['ready', 'en_route', 'on_scene', 'out', 'offline'] as Responder['status'][]).includes(s.status)
+        ? s.status
+        : 'ready',
+      location: { lng: s.lng, lat: s.lat },
+      groups: s.groups,
+      unitType: s.unit,
+      demo: true,
+    }));
+
+    // Replace existing demo responders (those whose id starts with R-DEMO-)
+    // but always keep SELF_ID so the responder workspace still works.
+    setResponders((prev) => {
+      const kept = prev.filter((r) => !r.id.startsWith('R-DEMO-'));
+      return [...kept, ...newResponders];
+    });
+
+    // Mirror group memberships back into the groups list so the Roster /
+    // Groups views render correctly without re-deriving on every paint.
+    setGroups((prev) =>
+      prev.map((g) => {
+        const memberIds = newResponders.filter((r) => r.groups.includes(g.id)).map((r) => r.id);
+        // Add to existing members (don't drop seed members or self if present).
+        const merged = Array.from(new Set([...g.members, ...memberIds]));
+        return { ...g, members: merged };
+      })
+    );
+
+    pushLog({
+      actorId: 'godmode',
+      actorRole: 'system',
+      action: 'godmode.roster_seeded',
+      targetId: 'operations.responders',
+      message: `Seeded ${newResponders.length} demo responders across SCDF, SPF, Medic, and Volunteer orgs.`,
+      visibleTo: ['ops'],
+    });
+  };
+
+  const godClearRoster: AppState['godClearRoster'] = () => {
+    setResponders((prev) => prev.filter((r) => !r.id.startsWith('R-DEMO-')));
+    setGroups((prev) =>
+      prev.map((g) => ({
+        ...g,
+        members: g.members.filter((id) => !id.startsWith('R-DEMO-')),
+      }))
+    );
+    pushLog({
+      actorId: 'godmode',
+      actorRole: 'system',
+      action: 'godmode.roster_cleared',
+      targetId: 'operations.responders',
+      message: 'Cleared demo responder roster.',
+      visibleTo: ['ops'],
+    });
+  };
+
   const godResetCsot: AppState['godResetCsot'] = () => {
     setReports([]);
     setSosSessions([]);
@@ -1570,6 +1728,8 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     joinCase,
     leaveCase,
     requestCaseFormation,
+    acceptCaseFormation,
+    declineCaseFormation,
     closeCase,
     ackNotification,
     selfLocation,
@@ -1582,6 +1742,8 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     setDraftPolygon,
     godSetSourceState,
     godSeedScenario,
+    godSeedRoster,
+    godClearRoster,
     godResetCsot,
   };
 
@@ -1597,8 +1759,12 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       setSelectedId,
       setActiveCaseId,
       godSeedScenario,
+      godSeedRoster,
+      godClearRoster,
       godResetCsot,
       godSetSourceState,
+      acceptCaseFormation,
+      declineCaseFormation,
       updateResponderLocation,
       SELF_ID,
     };

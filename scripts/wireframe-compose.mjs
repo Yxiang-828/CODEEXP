@@ -484,13 +484,12 @@ async function main() {
       `);
     }
     return `
-      <section class="lane lane-${lane.id}" data-lane="${lane.id}" style="--cols:${lane.wrapEvery}">
+      <section class="lane lane-${lane.id}" data-lane="${lane.id}">
         <header class="lane-head">
           <h2><span class="lane-pill">${escape(lane.title)}</span></h2>
           <p>${escape(lane.blurb)}</p>
         </header>
         <div class="lane-canvas">
-          <svg class="arrows" aria-hidden="true"></svg>
           <div class="grid">${cards.join('\n')}</div>
         </div>
       </section>
@@ -632,18 +631,14 @@ async function main() {
     }
     .lane-head p { margin: 0; font-size: 12px; color: #444; max-width: 100ch; }
 
-    .lane-canvas { position: relative; padding: 24px; }
-    .arrows {
-      position: absolute; inset: 0; width: 100%; height: 100%;
-      pointer-events: none; overflow: visible; z-index: 3;
-    }
+    .lane-canvas { padding: 24px 24px 28px; }
     .grid {
-      display: grid;
-      grid-template-columns: repeat(var(--cols, 4), 300px);
-      grid-auto-rows: minmax(380px, auto);
-      gap: 64px 80px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 40px 24px;
       position: relative;
       z-index: 2;
+      align-items: stretch;
     }
 
     .screen {
@@ -653,7 +648,33 @@ async function main() {
       display: flex; flex-direction: column;
       position: relative;
       width: 300px;
+      flex: 0 0 300px;
     }
+    /* Short forward arrow between consecutive tiles in the same row. */
+    .screen + .screen::before {
+      content: '';
+      position: absolute;
+      left: -22px;
+      top: 50%;
+      width: 18px;
+      height: 2px;
+      background: var(--ink);
+      transform: translateY(-50%);
+      pointer-events: none;
+    }
+    .screen + .screen::after {
+      content: '';
+      position: absolute;
+      left: -8px;
+      top: 50%;
+      width: 0; height: 0;
+      border-top: 6px solid transparent;
+      border-bottom: 6px solid transparent;
+      border-left: 9px solid var(--ink);
+      transform: translateY(-50%);
+      pointer-events: none;
+    }
+    .screen.wraps::before, .screen.wraps::after { display: none; }
     .screen header {
       padding: 6px 10px;
       border-bottom: 1.5px solid var(--ink);
@@ -704,10 +725,6 @@ async function main() {
     }
     .screen .comments li { margin-bottom: 2px; }
 
-    /* Arrow styling */
-    .arrow-path { fill: none; stroke: var(--ink); stroke-width: 2.4; stroke-linecap: round; }
-    .arrow-head { fill: var(--ink); }
-    .grid { z-index: 1; }
 
     footer.matrix {
       border: 2.5px solid var(--ink);
@@ -830,73 +847,25 @@ async function main() {
     </p>
   </footer>
 
+  <!-- No arrow JS: tiles are laid out in order via flex-wrap;
+       short → glyphs between consecutive tiles via CSS ::before. -->
   <script>
-    // Forward-only arrows. Two kinds:
-    //   'next' — source and target on the same row: straight horizontal.
-    //   'wrap' — target is on the row below: U-turn around the right edge
-    //            and back to the left to enter the next row.
-    const EDGES = ${edgeData};
-    function rect(el, svg) {
-      const s = svg.getBoundingClientRect();
-      const r = el.getBoundingClientRect();
-      return { left: r.left - s.left, right: r.right - s.left, top: r.top - s.top, bottom: r.bottom - s.top, midX: (r.left + r.right) / 2 - s.left, midY: (r.top + r.bottom) / 2 - s.top };
-    }
-    function nextPath(a, b) {
-      // straight horizontal from a.right to b.left, mid Y of source
-      const x1 = a.right + 6;
-      const y = a.midY;
-      const x2 = b.left - 10;
-      return 'M' + x1 + ',' + y + ' L' + x2 + ',' + y;
-    }
-    function wrapPath(a, b, svgWidth) {
-      // a is at end of its row; b is at start of next row.
-      const x1 = a.right + 6;
-      const y1 = a.midY;
-      const x2 = b.left - 10;
-      const y2 = b.midY;
-      const r = 14;
-      const outX = Math.min(svgWidth - 12, a.right + 40);
-      // right turn down, left turn back
-      return (
-        'M' + x1 + ',' + y1 +
-        ' L' + (outX - r) + ',' + y1 +
-        ' Q' + outX + ',' + y1 + ' ' + outX + ',' + (y1 + r) +
-        ' L' + outX + ',' + (y2 - r) +
-        ' Q' + outX + ',' + y2 + ' ' + (outX - r) + ',' + y2 +
-        ' L' + x2 + ',' + y2
-      );
-    }
-    function drawArrows() {
-      const lanes = document.querySelectorAll('.lane');
-      lanes.forEach((lane) => {
-        const svg = lane.querySelector('svg.arrows');
-        if (!svg) return;
-        svg.innerHTML = '';
-        const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
-        defs.innerHTML = '<marker id="ah-' + lane.dataset.lane + '" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0,0 L10,5 L0,10 Z" class="arrow-head"/></marker>';
-        svg.appendChild(defs);
-      });
-      EDGES.forEach((edge) => {
-        const fromEl = document.getElementById(edge.from);
-        const toEl = document.getElementById(edge.to);
-        if (!fromEl || !toEl) return;
-        const lane = fromEl.closest('.lane');
-        const svg = lane ? lane.querySelector('svg.arrows') : null;
-        if (!svg) return;
-        const svgBox = svg.getBoundingClientRect();
-        const a = rect(fromEl, svg);
-        const b = rect(toEl, svg);
-        const d = edge.kind === 'wrap' ? wrapPath(a, b, svgBox.width) : nextPath(a, b);
-        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-        path.setAttribute('d', d);
-        path.setAttribute('class', 'arrow-path');
-        path.setAttribute('marker-end', 'url(#ah-' + lane.dataset.lane + ')');
-        svg.appendChild(path);
+    // After layout, hide the → glyph on tiles that wrap to the start of a new
+    // row, so we don't get a phantom arrow at the left edge.
+    function hideWrapArrows() {
+      document.querySelectorAll('.grid').forEach((grid) => {
+        const screens = grid.querySelectorAll('.screen');
+        let lastTop = null;
+        screens.forEach((el) => {
+          const top = el.offsetTop;
+          el.classList.toggle('wraps', lastTop !== null && top !== lastTop);
+          lastTop = top;
+        });
       });
     }
-    if (document.readyState === 'complete') drawArrows();
-    else window.addEventListener('load', drawArrows);
-    window.addEventListener('resize', drawArrows);
+    if (document.readyState === 'complete') hideWrapArrows();
+    else window.addEventListener('load', hideWrapArrows);
+    window.addEventListener('resize', hideWrapArrows);
   </script>
 </body>
 </html>
