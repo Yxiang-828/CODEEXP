@@ -5,8 +5,13 @@ import GlobalActionDock from './layout/GlobalActionDock';
 import WorkspaceDrawer from './layout/WorkspaceDrawer';
 import BottomStrip from './layout/BottomStrip';
 import TrackingPill from './primitives/TrackingPill';
+import DemoLogin from './DemoLogin';
+import { useAppContext } from '../AppContext';
 
 export default function Shell() {
+  const { isAuthenticated } = useAppContext();
+  if (!isAuthenticated) return <DemoLogin />;
+
   return (
     <div className="flex flex-col h-screen w-screen overflow-hidden bg-surface-0 font-sans">
       <TopChrome />

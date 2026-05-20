@@ -1,0 +1,93 @@
+{
+  "name": "VolunteerEvent",
+  "type": "object",
+  "properties": {
+    "title": {
+      "type": "string",
+      "description": "Event title"
+    },
+    "description": {
+      "type": "string",
+      "description": "Detailed description"
+    },
+    "category": {
+      "type": "string",
+      "enum": [
+        "community_cleanup",
+        "first_aid_training",
+        "disaster_drill",
+        "food_distribution",
+        "elderly_care",
+        "youth_mentoring",
+        "environmental",
+        "other"
+      ],
+      "description": "Event category"
+    },
+    "date": {
+      "type": "string",
+      "format": "date",
+      "description": "Event date"
+    },
+    "start_time": {
+      "type": "string",
+      "description": "Start time e.g. 09:00"
+    },
+    "end_time": {
+      "type": "string",
+      "description": "End time e.g. 12:00"
+    },
+    "location": {
+      "type": "string",
+      "description": "Event venue"
+    },
+    "latitude": {
+      "type": "number"
+    },
+    "longitude": {
+      "type": "number"
+    },
+    "organizer": {
+      "type": "string",
+      "description": "Organizer name"
+    },
+    "max_volunteers": {
+      "type": "number",
+      "description": "Maximum number of volunteers needed"
+    },
+    "registered_volunteers": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "IDs of registered volunteers"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "upcoming",
+        "ongoing",
+        "completed",
+        "cancelled"
+      ],
+      "default": "upcoming"
+    },
+    "image_url": {
+      "type": "string",
+      "description": "Event image URL"
+    },
+    "skills_needed": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Skills needed for this event"
+    }
+  },
+  "required": [
+    "title",
+    "category",
+    "date",
+    "location"
+  ]
+}

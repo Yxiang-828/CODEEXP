@@ -1,5 +1,5 @@
 @echo off
-REM Quick Aid SG -- one-shot install + build.
+REM Kampung Kaki -- one-shot install + build.
 REM Usage: build.bat
 REM Produces a production-ready dist\ folder.
 setlocal

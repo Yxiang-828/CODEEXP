@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Quick Aid SG — one-shot install + build.
+# Kampung Kaki — one-shot install + build.
 # Usage: ./build.sh
 # Produces a production-ready `dist/` folder.
 set -e

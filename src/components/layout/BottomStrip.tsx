@@ -16,10 +16,10 @@ export default function BottomStrip() {
       </div>
       <div className="flex gap-4 text-[9px] uppercase tracking-widest font-bold text-text-primary">
         <span>
-          DB <span className="text-accent-success">CONNECTED</span>
+          DB <span className="text-accent-warning">DEMO</span>
         </span>
-        <span className="opacity-60 hidden md:inline">TILES LATEST</span>
-        <span className="opacity-60 hidden md:inline">PING 14MS</span>
+        <span className="opacity-60 hidden md:inline">ONEMAP TILES LIVE</span>
+        <span className="opacity-60 hidden md:inline">LIVE LAYERS WHEN CONFIGURED</span>
       </div>
     </div>
   );

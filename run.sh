@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Quick Aid SG — build + serve.
+# Kampung Kaki — build + serve.
 # Usage:
 #   ./run.sh           build + preview on 5173 (production)
 #   ./run.sh dev       dev server on 3000 (hot reload)
