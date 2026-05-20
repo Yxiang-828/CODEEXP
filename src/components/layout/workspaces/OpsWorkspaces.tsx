@@ -1,7 +1,9 @@
 import { useState } from 'react';
-import { ShieldAlert, RadioTower } from 'lucide-react';
+import { ShieldAlert, RadioTower, Bot, Sparkles } from 'lucide-react';
 import { useAppContext } from '../../../AppContext';
 import type { SeverityLevel } from '../../primitives/SeverityChip';
+import { askHostAi, type HostAiResponse } from '../../../services/hostAi';
+import { getDistanceKm } from '../../../utils/geo';
 
 // ---------------------------------------------------------------------------
 // OpsGenericList — template pattern, data injected by callers below
@@ -272,13 +274,30 @@ export function DispatchResponder() {
 // ---------------------------------------------------------------------------
 // BroadcastComposer — template UI, live polygon device count
 // ---------------------------------------------------------------------------
+// Polygon area (km²) via the shoelace formula in equirectangular projection.
+// Honest stand-in for live device density: we report area, not a fabricated
+// device count, until a real population/cells provider is wired.
+function polygonAreaKm2(points: { lng: number; lat: number }[]): number {
+  if (points.length < 3) return 0;
+  const R_LAT_KM = 110.574;
+  const lat0 = (points.reduce((s, p) => s + p.lat, 0) / points.length) * Math.PI / 180;
+  const lngKm = (lng: number) => lng * 111.32 * Math.cos(lat0);
+  let area = 0;
+  for (let i = 0; i < points.length; i++) {
+    const a = points[i];
+    const b = points[(i + 1) % points.length];
+    area += lngKm(a.lng) * (b.lat * R_LAT_KM) - lngKm(b.lng) * (a.lat * R_LAT_KM);
+  }
+  return Math.abs(area) / 2;
+}
+
 export function BroadcastComposer() {
   const { setDrawerContent, draftPolygon, pushNotification } = useAppContext();
   const [audience, setAudience] = useState<'all' | 'citizen'>('all');
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
   const hasPolygon = draftPolygon.length >= 3;
-  const derivedDevices = hasPolygon ? Math.max(1, Math.round(draftPolygon.length * 680)) : 0;
+  const polygonAreaKm = hasPolygon ? polygonAreaKm2(draftPolygon) : 0;
 
   const send = () => {
     if (!title.trim()) return;
@@ -293,7 +312,9 @@ export function BroadcastComposer() {
         <div>
           <h2 className="text-sm font-black uppercase tracking-widest">Geo-Broadcast</h2>
           <p className="text-[10px] font-bold tracking-widest opacity-80 uppercase mt-0.5">
-            {hasPolygon ? `Reach: ~${derivedDevices.toLocaleString()} devices in polygon` : 'Draw a polygon on the map first'}
+            {hasPolygon
+              ? `Polygon · ${polygonAreaKm.toFixed(2)} km² · device count unavailable (no live density provider)`
+              : 'Draw a polygon on the map first'}
           </p>
         </div>
       </div>
@@ -323,6 +344,152 @@ export function BroadcastComposer() {
           <RadioTower className="w-5 h-5" /> Issue Broadcast Directive
         </button>
       </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// OpsAssistant — command-desk copilot. Sees reports, SOS, cases, responders;
+// suggests dispatch + declaration moves grounded in real CSOT state.
+// ---------------------------------------------------------------------------
+export function OpsAssistant() {
+  const {
+    reports,
+    sosSessions,
+    cases,
+    responders,
+    events,
+    sources,
+    liveSnapshot,
+    notifications,
+  } = useAppContext();
+  const [prompt, setPrompt] = useState('What is the most urgent action right now?');
+  const [reply, setReply] = useState<HostAiResponse | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const reportQueue = reports
+    .filter((r) => r.status === 'pending' || r.status === 'claimed')
+    .slice(0, 8)
+    .map((r) => ({ id: r.id, kind: r.kind, title: r.title, status: r.status, createdAt: r.createdAt }));
+
+  const activeSos = sosSessions
+    .filter((s) => !['resolved', 'cancelled'].includes(s.status))
+    .map((s) => {
+      const closest = responders
+        .filter((r) => r.status === 'ready' || r.status === 'en_route')
+        .map((r) => ({ r, distanceKm: getDistanceKm(r.location, s.location) }))
+        .sort((a, b) => a.distanceKm - b.distanceKm)[0];
+      return {
+        id: s.id,
+        category: s.category,
+        status: s.status,
+        location: s.location,
+        assigned: s.assignedResponderId ?? 'unassigned',
+        nearestReady: closest
+          ? { id: closest.r.id, name: closest.r.name, distanceKm: Number(closest.distanceKm.toFixed(2)) }
+          : null,
+      };
+    });
+
+  const activeCases = cases
+    .filter((c) => c.state !== 'resolved')
+    .map((c) => ({
+      id: c.id,
+      name: c.name,
+      severity: c.severity,
+      state: c.state,
+      members: c.members.length,
+      restricted: !!c.restricted,
+    }));
+
+  const ask = async () => {
+    setLoading(true);
+    const result = await askHostAi({
+      role: 'ops',
+      workspace: 'ops_command',
+      prompt,
+      context: {
+        reportQueue,
+        activeSos,
+        cases: activeCases,
+        responders: responders
+          .filter((r) => r.status !== 'offline')
+          .slice(0, 12)
+          .map((r) => ({ id: r.id, name: r.name, role: r.role, status: r.status, location: r.location, unitType: r.unitType })),
+        recentEvents: events.slice(0, 6).map((e) => ({ id: e.id, kind: e.kind, title: e.title, severity: e.severity, status: e.status })),
+        sources: sources.map((s) => ({ name: s.name, state: s.state, note: s.note ?? '' })),
+        liveSnapshot: liveSnapshot
+          ? {
+              psiNational: liveSnapshot.psi.find((p) => p.region === 'national')?.psi24h ?? null,
+              rainfallStations: liveSnapshot.rainfall.length,
+            }
+          : null,
+        unreadNotifications: notifications.filter((n) => n.roles.includes('ops') && n.ackBy.length === 0).length,
+      },
+    }).catch(() => ({
+      state: 'unavailable' as const,
+      text: 'Host AI unavailable. Use the queue and dispatch panels directly.',
+      chips: [{ label: 'tool: host_ai', ref: 'unavailable' }],
+    }));
+    setReply(result);
+    setLoading(false);
+  };
+
+  return (
+    <div className="p-5 flex flex-col gap-4">
+      <h2 className="text-xl font-serif italic font-black flex items-center gap-2">
+        <Bot className="w-4 h-4" />
+        Command copilot
+      </h2>
+      <div className="grid grid-cols-3 gap-2">
+        <Metric label="Reports" value={reportQueue.length} />
+        <Metric label="SOS" value={activeSos.length} />
+        <Metric label="Cases" value={activeCases.length} />
+      </div>
+      <div className="bg-surface-2 border border-border-strong p-3 text-[11px] leading-relaxed shadow-[3px_3px_0_rgba(26,26,26,1)]">
+        Ops command copilot. It can rank dispatch options, draft a broadcast, or
+        check declaration thresholds — grounded in live CSOT, never invented.
+      </div>
+      <textarea
+        value={prompt}
+        onChange={(e) => setPrompt(e.target.value)}
+        className="w-full h-24 p-3 border border-border-strong bg-surface-0 text-sm font-mono resize-none outline-none focus:border-text-primary"
+      />
+      <button
+        onClick={ask}
+        disabled={loading}
+        className="w-full bg-surface-3 text-text-inverse py-3 text-[10px] uppercase font-bold tracking-widest border border-border-strong shadow-[3px_3px_0_rgba(26,26,26,1)] flex items-center justify-center gap-2 disabled:opacity-60"
+      >
+        <Sparkles className="w-3 h-3" />
+        {loading ? 'Asking Host AI' : 'Ask copilot'}
+      </button>
+      {reply && (
+        <div className="bg-surface-2 border border-border-strong p-3 text-sm leading-relaxed shadow-[3px_3px_0_rgba(26,26,26,1)]">
+          <strong className="block uppercase tracking-widest text-[9px] mb-1">Host AI · {reply.state}</strong>
+          <span className="whitespace-pre-line">{reply.text}</span>
+          {reply.chips && reply.chips.length > 0 && (
+            <div className="flex flex-wrap gap-1 mt-2">
+              {reply.chips.map((c) => (
+                <span
+                  key={c.label}
+                  className="px-1.5 py-0.5 border border-border-strong text-[8px] font-mono uppercase tracking-widest bg-surface-0"
+                >
+                  {c.label} · {c.ref}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Metric({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="border border-border-strong bg-surface-2 p-2 text-center">
+      <div className="text-[9px] font-black uppercase tracking-widest text-text-secondary">{label}</div>
+      <div className="text-lg font-mono font-black">{value.toString().padStart(2, '0')}</div>
     </div>
   );
 }

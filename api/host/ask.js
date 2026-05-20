@@ -1,5 +1,14 @@
+// Host AI endpoint.
+// Dispatches on (role, workspace) → dedicated system prompt + per-workspace
+// live tool prefetch (api/host/tools.js). Reply contract:
+//   { state: 'live' | 'not_configured' | 'unavailable', text, chips }
+// Honest absence beats invention — see ./systemPrompts.js.
+
+import { systemPromptFor, WORKSPACE_TOOLS } from './systemPrompts.js';
+import { runTools } from './tools.js';
+
 const MAX_PROMPT_CHARS = 1600;
-const MAX_CONTEXT_CHARS = 4800;
+const MAX_CONTEXT_CHARS = 6400;
 
 export default async function handler(req, res) {
   res.setHeader('content-type', 'application/json; charset=utf-8');
@@ -11,28 +20,40 @@ export default async function handler(req, res) {
     return;
   }
 
+  const body = await readJson(req);
+  const prompt = String(body?.prompt ?? '').slice(0, MAX_PROMPT_CHARS).trim();
+  const role = String(body?.role ?? 'unknown');
+  const workspace = String(body?.workspace ?? 'unknown');
+  const clientContext = body?.context ?? {};
+
+  if (!prompt) {
+    res.statusCode = 400;
+    res.end(JSON.stringify({ error: 'missing_prompt' }));
+    return;
+  }
+
+  // Prefetch live tools for this workspace. Failures degrade per-tool to
+  // {state:'unavailable'} so the LLM (or fallback) can be honest about gaps.
+  const origin = pickOrigin(clientContext);
+  const toolList = WORKSPACE_TOOLS[workspace] ?? [];
+  const tools = await runTools(toolList, { origin });
+
+  const enrichedContext = { ...clientContext, tools };
+  const serialised = JSON.stringify(enrichedContext).slice(0, MAX_CONTEXT_CHARS);
+
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) {
     res.statusCode = 200;
     res.end(
       JSON.stringify({
         state: 'not_configured',
-        text: 'Host AI is not configured on this deployment. No AI advice is being invented.',
-        chips: [{ label: 'tool: openrouter', ref: 'not_configured' }],
-      })
+        text: fallbackText(role, workspace, prompt, tools, enrichedContext),
+        chips: [
+          { label: 'tool: openrouter', ref: 'not_configured' },
+          ...toolChips(tools),
+        ],
+      }),
     );
-    return;
-  }
-
-  const body = await readJson(req);
-  const prompt = String(body?.prompt ?? '').slice(0, MAX_PROMPT_CHARS).trim();
-  const role = String(body?.role ?? 'unknown');
-  const workspace = String(body?.workspace ?? 'unknown');
-  const context = JSON.stringify(body?.context ?? {}).slice(0, MAX_CONTEXT_CHARS);
-
-  if (!prompt) {
-    res.statusCode = 400;
-    res.end(JSON.stringify({ error: 'missing_prompt' }));
     return;
   }
 
@@ -46,16 +67,13 @@ export default async function handler(req, res) {
         'x-title': 'Quick Aid SG',
       },
       body: JSON.stringify({
-        model: process.env.OPENROUTER_MODEL || process.env.OPENROUTER_MODEL_DEV || 'minimax/minimax-m2.5',
+        model:
+          process.env.OPENROUTER_MODEL ||
+          process.env.OPENROUTER_MODEL_DEV ||
+          'minimax/minimax-m2.5',
         messages: [
-          {
-            role: 'system',
-            content: systemPromptFor(role, workspace),
-          },
-          {
-            role: 'user',
-            content: `context=${context}\n\nrequest=${prompt}`,
-          },
+          { role: 'system', content: systemPromptFor(role, workspace) },
+          { role: 'user', content: `context=${serialised}\n\nrequest=${prompt}` },
         ],
         temperature: 0.2,
         max_tokens: 900,
@@ -67,9 +85,9 @@ export default async function handler(req, res) {
       res.end(
         JSON.stringify({
           state: 'unavailable',
-          text: `Host AI unavailable from provider: HTTP ${upstream.status}.`,
-          chips: [{ label: 'tool: openrouter', ref: 'unavailable' }],
-        })
+          text: `Host AI unavailable from provider: HTTP ${upstream.status}. ${fallbackText(role, workspace, prompt, tools, enrichedContext)}`,
+          chips: [{ label: 'tool: openrouter', ref: 'unavailable' }, ...toolChips(tools)],
+        }),
       );
       return;
     }
@@ -77,27 +95,27 @@ export default async function handler(req, res) {
     const data = await upstream.json();
     const rawText = data?.choices?.[0]?.message?.content?.trim();
     const text = normalizeHostText(rawText);
-    const fallback = fallbackGuidance(body?.context);
     const usable = text && text.length >= 40 && !looksLikeDump(text);
     res.statusCode = 200;
     res.end(
       JSON.stringify({
         state: 'live',
-        text: usable ? text : fallback,
+        text: usable ? text : fallbackText(role, workspace, prompt, tools, enrichedContext),
         chips: [
           { label: 'tool: openrouter', ref: 'live' },
           ...(usable ? [] : [{ label: 'tool: safety_fallback', ref: 'ai_output_incomplete' }]),
+          ...toolChips(tools),
         ],
-      })
+      }),
     );
   } catch (error) {
     res.statusCode = 200;
     res.end(
       JSON.stringify({
         state: 'unavailable',
-        text: `Host AI unavailable: ${error?.message ?? 'provider request failed'}.`,
-        chips: [{ label: 'tool: openrouter', ref: 'unavailable' }],
-      })
+        text: `Host AI unavailable: ${error?.message ?? 'provider request failed'}. ${fallbackText(role, workspace, prompt, tools, enrichedContext)}`,
+        chips: [{ label: 'tool: openrouter', ref: 'unavailable' }, ...toolChips(tools)],
+      }),
     );
   }
 }
@@ -107,7 +125,7 @@ function readJson(req) {
     let raw = '';
     req.on('data', (chunk) => {
       raw += chunk;
-      if (raw.length > 20_000) req.destroy();
+      if (raw.length > 32_000) req.destroy();
     });
     req.on('end', () => {
       try {
@@ -120,39 +138,25 @@ function readJson(req) {
   });
 }
 
-function systemPromptFor(role, workspace) {
-  const NEVER_INVENT = 'Never invent values not present in context. If a value is missing, write exactly: unavailable';
-  const SG_EMERGENCY = 'Singapore emergency: 995 fire/ambulance · 999 police threat.';
+function pickOrigin(ctx) {
+  const loc =
+    ctx?.userStatus?.location ??
+    ctx?.selfLocation ??
+    ctx?.case?.centroid ??
+    ctx?.event?.location ??
+    ctx?.currentAlert?.location ??
+    null;
+  if (!loc) return null;
+  if (Number.isFinite(loc.lng) && Number.isFinite(loc.lat)) return { lng: loc.lng, lat: loc.lat };
+  return null;
+}
 
-  if (workspace === 'citizen_ai' || workspace === 'incident_guidance') {
-    return [
-      'You are the Quick Aid SG safety advisor. Role: citizen during an active Singapore alert.',
-      NEVER_INVENT,
-      'Output 3 plain-text sections: Situation · Do now · If worse. Max 3 bullets each. No markdown bold, no tables, no raw JSON.',
-      SG_EMERGENCY + ' Always include if event severity is 3 or above.',
-      'Use currentEvent.title, currentEvent.kind, currentEvent.severity from context. If no event, give generic safe-distance advice.',
-    ].join(' ');
+function toolChips(tools) {
+  const out = [];
+  for (const [name, value] of Object.entries(tools ?? {})) {
+    out.push({ label: `tool: ${name}`, ref: value?.state ?? 'unavailable' });
   }
-
-  if (workspace === 'case_lobby') {
-    return [
-      'You are the Quick Aid SG Host AI embedded in a responder case room.',
-      'Supported slash commands: /host status · /host nearest aed · /host hospital load · /host weather · /host escalate? · /host help.',
-      NEVER_INVENT,
-      'Use case.name, case.state, case.severity, and the responders array from context for /host status.',
-      'For /host weather use liveSnapshot.psi if present. For /host hospital load always say unavailable — no real source is wired.',
-      'For /host nearest aed say unavailable — OneMap theme is not yet wired.',
-      'For /host escalate? base your yes/no on case.severity and any sos entries if present in context. No invented facts.',
-      'Reply in ≤ 6 terse lines. Plain text only.',
-    ].join(' ');
-  }
-
-  return [
-    'You are the Quick Aid SG Host AI. Role: ' + role + '.',
-    NEVER_INVENT,
-    'Plain text only. No markdown tables, no raw JSON. ≤ 8 lines.',
-    SG_EMERGENCY,
-  ].join(' ');
+  return out;
 }
 
 function normalizeHostText(text) {
@@ -166,42 +170,127 @@ function normalizeHostText(text) {
 
 function looksLikeDump(text) {
   const tableLines = text.split('\n').filter((line) => line.includes('|')).length;
-  return tableLines >= 2 || text.includes('{') || text.includes('```');
+  return tableLines >= 2 || text.includes('```');
 }
 
-function fallbackGuidance(context) {
-  const current = context?.currentAlert ?? context?.currentEvent ?? context?.nearbyAlerts?.[0] ?? {};
-  const user = context?.userStatus ?? {};
-  const kind = String(current.kind ?? 'other');
-  const title = current.title ? String(current.title) : 'Current alert';
-  const severity = current.severity ? String(current.severity) : 'severity unavailable';
-  const distance = Number.isFinite(current.distanceKm) ? `${current.distanceKm} km away` : 'distance unavailable';
-  const liveValue = current.liveValue && current.liveValue !== 'unavailable' ? String(current.liveValue) : 'unavailable';
-  const locationSource = user.location?.source === 'browser_live_gps'
-    ? 'your live device location'
-    : 'fallback location only; your real location is unavailable';
-  const action = actionForKind(kind);
+// ──────────────────────────────────────────────────────────────────────
+// Fallback: deterministic, honest text when OpenRouter is missing or
+// returns an incomplete answer. Uses prefetched tools + client context.
+// ──────────────────────────────────────────────────────────────────────
+function fallbackText(role, workspace, prompt, tools, ctx) {
+  const q = prompt.toLowerCase();
+  const psiNat = tools?.psi?.psi24h?.national;
+  const psiState = tools?.psi?.state;
+  const nearestAed = tools?.nearestAed?.nearest?.[0];
+  const nearestHospital = tools?.nearestHospital?.nearest?.[0];
 
-  return [
-    'Situation',
-    `- ${title} is ${distance}. Severity: ${severity}.`,
-    `- Live measurement: ${liveValue}. Location basis: ${locationSource}.`,
-    '',
-    'Do now',
-    `- ${action.primary}`,
-    `- ${action.secondary}`,
-    '',
-    'If worse',
-    `- ${action.escalate}`,
-    '- Call 995 for fire/ambulance rescue or 999 for immediate police threat.',
-  ].join('\n');
+  if (workspace === 'citizen_alert' || workspace === 'incident_guidance') {
+    const alert = ctx?.currentAlert;
+    return [
+      'Situation',
+      `- ${alert?.title ?? 'Current alert'} · ${alert?.distanceKm ? alert.distanceKm + ' km away' : 'distance unavailable'} · severity ${alert?.severity ?? 'unavailable'}.`,
+      `- Live: ${alert?.liveValue ?? 'unavailable'}. Location basis: ${ctx?.userStatus?.location?.source ?? 'fallback'}.`,
+      '',
+      'Do now',
+      `- ${actionForKind(alert?.kind).primary}`,
+      `- ${actionForKind(alert?.kind).secondary}`,
+      '',
+      'If worse',
+      `- ${actionForKind(alert?.kind).escalate}`,
+      '- Call 995 for fire/ambulance, 999 for police threats.',
+    ].join('\n');
+  }
+
+  if (workspace === 'citizen_assistant' || workspace === 'citizen_ai') {
+    const lines = [];
+    if (psiState === 'live') {
+      lines.push(`PSI national: ${psiNat ?? 'unavailable'}.`);
+    } else {
+      lines.push('PSI: unavailable on this deployment.');
+    }
+    if (nearestAed) {
+      lines.push(`Nearest AED: ${nearestAed.name} · ${nearestAed.distanceKm} km.`);
+    } else {
+      lines.push('Nearest AED: unavailable (OneMap not configured).');
+    }
+    if (nearestHospital) {
+      lines.push(`Nearest A&E: ${nearestHospital.name} · ${nearestHospital.distanceKm} km.`);
+    }
+    lines.push('For immediate danger call 995 (fire/ambulance) or 999 (police).');
+    return lines.join('\n');
+  }
+
+  if (workspace === 'responder_case' || workspace === 'case_lobby') {
+    const caseRoom = ctx?.case;
+    const responders = ctx?.responders ?? [];
+    if (q.includes('status') && caseRoom) {
+      const onScene = responders.filter((r) => r.status === 'on_scene').length;
+      const enRoute = responders.filter((r) => r.status === 'en_route').length;
+      return `${caseRoom.name} · ${caseRoom.state} · sev ${caseRoom.severity} · ${responders.length} members · ${onScene} on scene · ${enRoute} en route.`;
+    }
+    if (q.includes('aed')) {
+      return nearestAed
+        ? `Nearest AED: ${nearestAed.name} · ${nearestAed.distanceKm} km.`
+        : 'Nearest AED: unavailable (OneMap not configured server-side).';
+    }
+    if (q.includes('hospital')) {
+      return nearestHospital
+        ? `Nearest A&E: ${nearestHospital.name} · ${nearestHospital.distanceKm} km.`
+        : 'Hospital load: unavailable. No live MOH/hospital load source.';
+    }
+    if (q.includes('weather') || q.includes('psi')) {
+      return psiState === 'live'
+        ? `PSI national ${psiNat ?? 'unavailable'} (NEA live).`
+        : 'NEA PSI: unavailable.';
+    }
+    if (q.includes('escalate')) {
+      const openSos = (ctx?.sos ?? []).length;
+      const sev = caseRoom?.severity ?? 0;
+      const yes = sev >= 4 || openSos >= 3;
+      return `${yes ? 'YES' : 'NO'}. Severity ${sev} · ${openSos} open SOS pings.`;
+    }
+    return 'Try: /host status · /host nearest aed · /host hospital load · /host weather · /host escalate? · /host help.';
+  }
+
+  if (workspace === 'responder_mission') {
+    const joinable = ctx?.joinableSos ?? [];
+    const cases = ctx?.joinableCases ?? [];
+    const lines = [];
+    if (joinable[0]) {
+      lines.push(
+        `Open SOS · ${joinable[0].id} · ${joinable[0].category} · ${joinable[0].distanceKm} km · fit ${joinable[0].fit}%.`,
+      );
+    }
+    if (cases[0]) {
+      lines.push(
+        `${cases[0].restricted ? 'Monitor-only · ' : 'Case · '}${cases[0].name} · sev ${cases[0].severity} · ${cases[0].distanceKm} km.`,
+      );
+    }
+    if (lines.length === 0) lines.push('No joinable missions within range.');
+    return lines.join('\n');
+  }
+
+  if (workspace === 'ops_command') {
+    const rq = ctx?.reportQueue?.length ?? 0;
+    const sos = ctx?.activeSos?.length ?? 0;
+    const cs = ctx?.cases?.length ?? 0;
+    const lines = [
+      `Queue · ${rq} reports · ${sos} active SOS · ${cs} cases.`,
+      psiState === 'live'
+        ? `PSI national ${psiNat ?? 'unavailable'}.`
+        : 'PSI: unavailable on this deployment.',
+    ];
+    return lines.join('\n');
+  }
+
+  return 'Host AI fallback: workspace not configured. Try /host help.';
 }
 
 function actionForKind(kind) {
   if (kind === 'flood') {
     return {
       primary: 'Stay out of floodwater and avoid underpasses, drains, canals, and low roads.',
-      secondary: 'Move to higher ground or remain indoors if your route crosses standing or moving water.',
+      secondary: 'Move to higher ground or remain indoors if your route crosses standing water.',
       escalate: 'If water is rising near you or someone is trapped, leave early if safe and request rescue.',
     };
   }
@@ -209,7 +298,7 @@ function actionForKind(kind) {
     return {
       primary: 'Stay off live lanes and keep behind a barrier or inside a safe building.',
       secondary: 'Do not approach vehicles unless emergency services instruct you and it is safe.',
-      escalate: 'If there are injuries, fire, fuel leaks, or blocked traffic creating danger, call emergency services.',
+      escalate: 'If there are injuries, fire, fuel leaks, or blocked traffic creating danger, call 995.',
     };
   }
   if (kind === 'fire') {

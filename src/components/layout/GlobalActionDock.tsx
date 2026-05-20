@@ -29,6 +29,7 @@ export default function GlobalActionDock() {
     responder: [
       { label: 'Toggle duty', icon: CheckCircle, action: action('duty') },
       { label: 'Join', icon: Radio, action: action('joinable_missions') },
+      { label: 'AI', icon: Bot, action: action('responder_ai') },
       { label: 'Events', icon: FileText, action: action('volunteer_events') },
       { label: 'Form case', icon: Target, action: action('form_case') },
       { label: 'Logs', icon: ScrollText, action: action('activity_log') },
@@ -37,6 +38,7 @@ export default function GlobalActionDock() {
       { label: 'Declare', icon: Shield, action: action('declare') },
       { label: 'Zones', icon: Target, action: action('zones') },
       { label: 'Dispatch', icon: Navigation, action: action('dispatch') },
+      { label: 'AI', icon: Bot, action: action('ops_ai') },
       { label: 'Broadcast', icon: Megaphone, action: action('broadcast') },
       { label: 'Logs', icon: ScrollText, action: action('activity_log') },
     ],

@@ -184,7 +184,8 @@ export function IncidentGuidance() {
 }
 
 export function ReportCompose() {
-  const { fileReport, createVolunteerEvent, setDrawerContent } = useAppContext();
+  const { fileReport, createVolunteerEvent, setDrawerContent, selfLocation, selfPlaceName } =
+    useAppContext();
   const [mode, setMode] = useState<'form' | 'voice' | 'volunteer' | null>(null);
   const [step, setStep] = useState(1);
   const [kind, setKind] = useState<'fire' | 'flood' | 'medical' | 'crash' | 'hazard' | 'other'>('hazard');
@@ -194,12 +195,23 @@ export function ReportCompose() {
   const [voiceText, setVoiceText] = useState('');
   const [volunteerTitle, setVolunteerTitle] = useState('Community support request');
 
+  // Reports are pinned to the device's live GPS. If GPS is off we still file,
+  // but the body is annotated so ops know the location is approximate.
+  const reportLocation = selfLocation ?? { lng: 103.8198, lat: 1.3521 }; // SG centroid fallback
+  const locationApproximate = !selfLocation;
+  const locationLabel = selfPlaceName
+    ? `${selfPlaceName} (${reportLocation.lat.toFixed(3)}°N ${reportLocation.lng.toFixed(3)}°E)`
+    : `${reportLocation.lat.toFixed(3)}°N ${reportLocation.lng.toFixed(3)}°E`;
+
+  const annotateApprox = (text: string) =>
+    locationApproximate ? `${text}\n[Location approximate — citizen GPS was off when filing.]` : text;
+
   const submit = () => {
     fileReport({
       kind,
       title: title || kind[0].toUpperCase() + kind.slice(1) + ' nearby',
-      body,
-      location: { lng: 103.85, lat: 1.3 },
+      body: annotateApprox(body),
+      location: reportLocation,
     });
     setStep(5);
   };
@@ -218,8 +230,8 @@ export function ReportCompose() {
     fileReport({
       kind: parsedKind,
       title: 'Voice report · ' + parsedKind,
-      body: voiceText || 'Voice report submitted without transcript.',
-      location: { lng: 103.85, lat: 1.3 },
+      body: annotateApprox(voiceText || 'Voice report submitted without transcript.'),
+      location: reportLocation,
     });
     setStep(5);
   };
@@ -228,9 +240,9 @@ export function ReportCompose() {
     createVolunteerEvent({
       title: volunteerTitle,
       category: 'other',
-      description: body || 'Community support request submitted by citizen.',
-      location: { lng: 103.85, lat: 1.3 },
-      venue: 'Citizen reported location',
+      description: annotateApprox(body || 'Community support request submitted by citizen.'),
+      location: reportLocation,
+      venue: selfPlaceName ?? 'Citizen reported location',
       organizer: 'U_self',
       date: new Date().toISOString().slice(0, 10),
       skillsNeeded: ['first aid', 'coordination'],
@@ -346,9 +358,13 @@ export function ReportCompose() {
       {step === 2 && (
         <div className="p-5 flex-1 flex flex-col gap-3">
           <h3 className="text-[10px] uppercase font-bold tracking-widest">Step 2 · Location</h3>
-          <Card>Pin dropped at approx your location.</Card>
+          <Card>
+            {selfLocation
+              ? 'Pin dropped at your live device GPS.'
+              : 'Citizen GPS is off. Pin will fall back to Singapore centroid and report will be flagged as approximate.'}
+          </Card>
           <div className="font-mono text-[11px] bg-surface-2 border border-border-strong p-3">
-            1.300° N · 103.850° E
+            {locationLabel}
           </div>
         </div>
       )}
@@ -427,10 +443,13 @@ export function ReportCompose() {
 }
 
 export function NeedHelpSOS() {
-  const { startSos, setDrawerContent } = useAppContext();
+  const { startSos, setDrawerContent, selfLocation, selfPlaceName, users } = useAppContext();
   const [category, setCategory] = useState<'medical' | 'fire' | 'trapped' | 'threat' | 'hazard' | 'other'>('medical');
+  const citizenName = users.find((u) => u.id === 'U-CIV-1')?.displayName ?? 'Citizen';
+  const sosLocation = selfLocation ?? { lng: 103.8198, lat: 1.3521 };
+  const locationApprox = !selfLocation;
   const send = () => {
-    startSos({ citizenName: 'U_self', category, location: { lng: 103.85, lat: 1.3 } });
+    startSos({ citizenName, category, location: sosLocation });
     setDrawerContent('sos_live');
   };
   return (
@@ -440,6 +459,19 @@ export function NeedHelpSOS() {
         <p className="text-[10px] uppercase font-bold tracking-widest mt-1 opacity-90">
           Pick a category. Ops and suitable responders are notified immediately.
         </p>
+      </div>
+      <div className="px-5 pt-3">
+        <div
+          className={`px-3 py-2 border text-[10px] uppercase font-bold tracking-widest font-mono ${
+            locationApprox
+              ? 'bg-accent-warning text-text-primary border-border-strong'
+              : 'bg-surface-2 border-border-strong'
+          }`}
+        >
+          {locationApprox
+            ? `GPS off · pin will be ${sosLocation.lat.toFixed(3)}°N ${sosLocation.lng.toFixed(3)}°E (Singapore centroid)`
+            : `Live GPS · ${selfPlaceName ?? `${sosLocation.lat.toFixed(4)}°N ${sosLocation.lng.toFixed(4)}°E`}`}
+        </div>
       </div>
       <div className="p-5 grid grid-cols-2 gap-2 flex-1">
         {(['medical', 'fire', 'trapped', 'threat', 'hazard', 'other'] as const).map((c) => (

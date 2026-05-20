@@ -7,6 +7,7 @@ import BottomStrip from './layout/BottomStrip';
 import TrackingPill from './primitives/TrackingPill';
 import DemoLogin from './DemoLogin';
 import PermissionPrompt from './PermissionPrompt';
+import GodMode from './GodMode';
 import { useAppContext } from '../AppContext';
 import useGpsTracking from '../hooks/useGpsTracking';
 
@@ -44,6 +45,7 @@ function ShellInner() {
         <WorkspaceDrawer />
       </div>
       <PermissionPrompt />
+      <GodMode />
     </div>
   );
 }

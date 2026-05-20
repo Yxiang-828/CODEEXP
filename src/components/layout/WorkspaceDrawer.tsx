@@ -27,6 +27,8 @@ const DRAWER_TITLES: Record<string, string> = {
   profile: 'Profile',
   alerts: 'Alerts',
   citizen_ai: 'Citizen AI',
+  responder_ai: 'Mission copilot',
+  ops_ai: 'Command copilot',
   sos_detail: 'SOS detail',
 };
 
