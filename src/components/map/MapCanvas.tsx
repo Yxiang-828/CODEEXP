@@ -36,6 +36,7 @@ const ONEMAP_GREY = 'https://www.onemap.gov.sg/maps/tiles/Grey/{z}/{x}/{y}.png';
 const ONEMAP_DEFAULT = 'https://www.onemap.gov.sg/maps/tiles/Default/{z}/{x}/{y}.png';
 
 const SG_CENTER: [number, number] = [103.8198, 1.3521];
+const POI_LABEL_ZOOM = 14;
 
 const DEMO_HOSPITAL_POIS: MapPoi[] = [
   { id: 'H-SGH', name: 'SGH', detail: 'Hospital · demo fallback', lng: 103.8359, lat: 1.2806, source: 'demo' },
@@ -302,6 +303,19 @@ export default function MapCanvas() {
         type: 'line',
         source: 'draft',
         paint: { 'line-color': '#60A5FA', 'line-width': 2 },
+      });
+    });
+
+    map.on('zoom', () => {
+      const z = map.getZoom();
+      const pois = containerRef.current?.querySelectorAll('.qa-poi-marker');
+      if (!pois) return;
+      pois.forEach((el) => {
+        if (z >= POI_LABEL_ZOOM) {
+          el.classList.remove('qa-poi-compact');
+        } else {
+          el.classList.add('qa-poi-compact');
+        }
       });
     });
 
@@ -686,14 +700,11 @@ function addIconMarker(
   }
 ) {
   const el = document.createElement('button');
-  el.className = `qa-poi-marker qa-poi-${opts.tone} ${!opts.medium ? 'qa-poi-compact' : ''} ${
-    opts.medium ? 'qa-poi-medium' : ''
-  }`;
+  const zoomed = map.getZoom() >= POI_LABEL_ZOOM;
+  el.className = `qa-poi-marker qa-poi-${opts.tone}${zoomed ? '' : ' qa-poi-compact'}`;
   el.type = 'button';
   el.setAttribute('aria-label', `${opts.label}: ${opts.title}`);
-  el.innerHTML = `<span aria-hidden="true">${mapIconMarkup(opts.icon, 16)}</span>${
-    opts.medium ? `<strong>${opts.label}</strong>` : ''
-  }`;
+  el.innerHTML = `<span aria-hidden="true">${mapIconMarkup(opts.icon, 16)}</span><strong>${escapeHtml(opts.label)}</strong><em>${escapeHtml(opts.title)}</em>`;
   const popup = new Popup({ offset: 12, closeButton: false, className: 'qa-hover-popup' }).setHTML(
     `<div style="font-family:ui-sans-serif;max-width:240px"><strong style="display:block;font-size:11px;text-transform:uppercase;letter-spacing:.08em">${escapeHtml(
       opts.title

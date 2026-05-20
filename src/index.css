@@ -67,6 +67,9 @@ body {
   font-style: normal;
   font-weight: 700;
   opacity: 0.75;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .qa-poi-marker {
@@ -119,22 +122,8 @@ body {
 }
 
 .qa-poi-compact em,
-.qa-poi-compact:not(.qa-poi-medium) strong {
+.qa-poi-compact strong {
   display: none;
-}
-
-.qa-poi-medium {
-  width: auto;
-  min-width: 0;
-  height: 32px;
-  justify-content: flex-start;
-  gap: 6px;
-  padding-right: 7px;
-}
-
-.qa-poi-medium strong {
-  display: block;
-  white-space: nowrap;
 }
 
 .qa-poi-hospital > span,
