@@ -1599,6 +1599,8 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       godSeedScenario,
       godResetCsot,
       godSetSourceState,
+      updateResponderLocation,
+      SELF_ID,
     };
   }
 

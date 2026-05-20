@@ -23,9 +23,9 @@ const HTML_OUT = join(DOCS_DIR, 'index.html');
 const PNG_OUT = join(DOCS_DIR, 'wireframe.png');
 const NOJEKYLL = join(DOCS_DIR, '.nojekyll');
 
-// id → { match, title, desc, comments[], col, row }
+// id → { match, title, desc, comments[] }
 // match = suffix of screenshot file after the NN- prefix
-// col/row in the lane's CSS grid (1-indexed)
+// Grid position is computed from lane.order[] so flows always read forward.
 const SCREENS = {
   // ── Auth ─────────────────────────────────────────────────────────
   'auth-login': {
@@ -37,7 +37,7 @@ const SCREENS = {
       'Calls AppContext.demoLogin(role) — no backend auth in this section.',
       'Login screen never sees the map; chrome and dock load only after auth.',
     ],
-    col: 1, row: 1,
+
   },
 
   // ── Citizen ──────────────────────────────────────────────────────
@@ -50,7 +50,7 @@ const SCREENS = {
       'Only verified events + NEA live overlays show on this map (no responder pins).',
       'GPS toggle is opt-in; pinned location is shown as a labelled point if granted.',
     ],
-    col: 1, row: 1,
+
   },
   'cz-brief': {
     lane: 'citizen',
@@ -60,7 +60,7 @@ const SCREENS = {
     comments: [
       'Driven by selectors.selectBriefingCounts(role) — same source for the top-chrome counter.',
     ],
-    col: 2, row: 1,
+
   },
   'cz-alerts': {
     lane: 'citizen',
@@ -71,7 +71,7 @@ const SCREENS = {
       'Uses selectNearby<CanonicalEvent>(events, selfLocation, 5).',
       'Falls back to Singapore centroid only when GPS is off — explicitly labelled.',
     ],
-    col: 3, row: 1,
+
   },
   'cz-report': {
     lane: 'citizen',
@@ -82,7 +82,7 @@ const SCREENS = {
       'Pin uses selfLocation; report body annotated "[approximate]" when GPS off.',
       'Voice mode parses keywords (fire / flood / medical / crash) into a kind.',
     ],
-    col: 1, row: 2,
+
   },
   'cz-sos': {
     lane: 'citizen',
@@ -93,7 +93,7 @@ const SCREENS = {
       'GPS banner is yellow + "Singapore centroid" copy when no live location.',
       'startSos(citizenName, category, location) — citizenName pulled from the AppUser table, not hardcoded.',
     ],
-    col: 2, row: 2,
+
   },
   'cz-sos-live': {
     lane: 'citizen',
@@ -104,7 +104,7 @@ const SCREENS = {
       'ETA derived from getDistanceKm(responder, sos) and a 35 km/h surface mix.',
       'Closure requires citizen + responder safe-acks before ops can audit-close.',
     ],
-    col: 3, row: 2,
+
   },
   'cz-ai': {
     lane: 'citizen',
@@ -115,7 +115,7 @@ const SCREENS = {
       'Workspace: citizen_assistant. Server prefetches PSI + nearest AED.',
       'Says "unavailable" rather than invent live values — no PSI/AED hallucinations.',
     ],
-    col: 4, row: 1,
+
   },
 
   // ── Responder ────────────────────────────────────────────────────
@@ -127,7 +127,7 @@ const SCREENS = {
     comments: [
       'Responder map sees: verified events, SOS, all responders (with org tone), and own position.',
     ],
-    col: 1, row: 1,
+
   },
   'rp-mboard': {
     lane: 'responder',
@@ -137,7 +137,7 @@ const SCREENS = {
     comments: [
       'selectCurrentMission() resolves SOS-assigned-to-self first, then any case the responder has joined.',
     ],
-    col: 2, row: 1,
+
   },
   'rp-join': {
     lane: 'responder',
@@ -148,7 +148,7 @@ const SCREENS = {
       'fitForSos / fitForCase — capability × distance × ready-status × severity.',
       'Restricted official cases get "monitor only" not "join".',
     ],
-    col: 3, row: 1,
+
   },
   'rp-copilot': {
     lane: 'responder',
@@ -159,7 +159,7 @@ const SCREENS = {
       'Workspace: responder_mission. Volunteer unitType de-prioritises suppression-heavy fires.',
       'No host call until Ask pressed — quota-safe.',
     ],
-    col: 4, row: 1,
+
   },
   'rp-groups': {
     lane: 'responder',
@@ -169,7 +169,7 @@ const SCREENS = {
     comments: [
       'Cases section is the same data as the left rail "Rooms" list.',
     ],
-    col: 1, row: 2,
+
   },
   'rp-events': {
     lane: 'responder',
@@ -179,7 +179,7 @@ const SCREENS = {
     comments: [
       'Sorted by distance from the responder\'s last-known location.',
     ],
-    col: 2, row: 2,
+
   },
   'rp-log': {
     lane: 'responder',
@@ -189,7 +189,7 @@ const SCREENS = {
     comments: [
       'Same backing store as ops/citizen logs; visibility filtered by ActionLog.visibleTo.',
     ],
-    col: 3, row: 2,
+
   },
 
   // ── Ops ──────────────────────────────────────────────────────────
@@ -201,7 +201,7 @@ const SCREENS = {
     comments: [
       'Only ops sees the polygon/lasso toolbox + draftPolygon state.',
     ],
-    col: 1, row: 1,
+
   },
   'ops-reports': {
     lane: 'ops',
@@ -212,7 +212,7 @@ const SCREENS = {
       'Verify creates a CanonicalEvent and notifies the reporter + responders.',
       'Dismiss notifies the reporter that nothing was published.',
     ],
-    col: 2, row: 1,
+
   },
   'ops-distress': {
     lane: 'ops',
@@ -222,7 +222,7 @@ const SCREENS = {
     comments: [
       'Click-through routes straight to the dispatch flow.',
     ],
-    col: 3, row: 1,
+
   },
   'ops-cases': {
     lane: 'ops',
@@ -232,7 +232,7 @@ const SCREENS = {
     comments: [
       'Case state pipeline: forming → staging → active → consolidating → resolved.',
     ],
-    col: 4, row: 1,
+
   },
   'ops-roster': {
     lane: 'ops',
@@ -242,7 +242,7 @@ const SCREENS = {
     comments: [
       'Filters out offline units; pros + volunteers shown side-by-side with org tag.',
     ],
-    col: 1, row: 2,
+
   },
   'ops-dispatch': {
     lane: 'ops',
@@ -252,7 +252,7 @@ const SCREENS = {
     comments: [
       'One-tap assign — also patches the responder to en_route + the SOS to ack.',
     ],
-    col: 2, row: 2,
+
   },
   'ops-declare': {
     lane: 'ops',
@@ -262,7 +262,7 @@ const SCREENS = {
     comments: [
       'Severity ≥ 4 fires an urgent notification to citizens + responders + ops.',
     ],
-    col: 3, row: 2,
+
   },
   'ops-copilot': {
     lane: 'ops',
@@ -273,7 +273,7 @@ const SCREENS = {
       'Workspace: ops_command. Suggests dispatch + drafts broadcasts grounded in the live snapshot.',
       'ETAs always m:ss via 35 km/h surface mix — never invented.',
     ],
-    col: 4, row: 2,
+
   },
   'ops-broadcast': {
     lane: 'ops',
@@ -283,7 +283,7 @@ const SCREENS = {
     comments: [
       'Shows polygon area in km² (shoelace) — no fabricated device count.',
     ],
-    col: 1, row: 3,
+
   },
   'ops-sources': {
     lane: 'ops',
@@ -294,7 +294,7 @@ const SCREENS = {
       'Sources from /api/host/tools.js + NEA + OneMap layers all report into this view.',
       'God Mode can flip states to demo degradation paths.',
     ],
-    col: 2, row: 3,
+
   },
   'ops-log': {
     lane: 'ops',
@@ -304,7 +304,7 @@ const SCREENS = {
     comments: [
       'Same store as responder/citizen log — visibility scoped by ActionLog.visibleTo.',
     ],
-    col: 3, row: 3,
+
   },
 
   // ── God Mode ─────────────────────────────────────────────────────
@@ -316,7 +316,7 @@ const SCREENS = {
     comments: [
       'Mirrors state/relations.ts. Source of truth for the wireframe lane structure.',
     ],
-    col: 1, row: 1,
+
   },
   'god-seed': {
     lane: 'godmode',
@@ -326,7 +326,7 @@ const SCREENS = {
     comments: [
       'Major seed lands a critical fire + open medical SOS — drives the responder + ops pushes.',
     ],
-    col: 2, row: 1,
+
   },
   'god-sources': {
     lane: 'godmode',
@@ -336,7 +336,7 @@ const SCREENS = {
     comments: [
       'Same SourceHealth array the ops surface reads — single CSOT mutation.',
     ],
-    col: 3, row: 1,
+
   },
   'god-matrix': {
     lane: 'godmode',
@@ -346,7 +346,7 @@ const SCREENS = {
     comments: [
       'Mirrors api/host/systemPrompts.js. Five real modes + back-compat aliases.',
     ],
-    col: 4, row: 1,
+
   },
   'god-seeded': {
     lane: 'godmode',
@@ -356,72 +356,99 @@ const SCREENS = {
     comments: [
       'Useful for the pitch: shows the cluster relations animate with a single click.',
     ],
-    col: 5, row: 1,
+
   },
 };
 
+// Each lane is a linear flow. order[] declares the user journey; tiles wrap
+// every `wrapEvery` screens onto a new row. EDGES are auto-derived to be
+// strictly forward (i → i+1), so arrows never cross tiles.
 const LANES = [
-  { id: 'auth', title: '1 · Auth', blurb: 'Demo accounts gate the shell.', cols: 1 },
-  { id: 'citizen', title: '2 · Citizen', blurb: 'Map · brief · report · SOS · AI. Only verified incidents reach this role.', cols: 4 },
-  { id: 'responder', title: '3 · Responder', blurb: 'Mission board + case rooms. Volunteer / professional treated equally; restricted cases are monitor-only.', cols: 4 },
-  { id: 'ops', title: '4 · Ops', blurb: 'Triage, dispatch, declare, broadcast. Every action lands in the audit log.', cols: 4 },
-  { id: 'godmode', title: '5 · God Mode (demo dock)', blurb: 'Off by default. Seeds scenarios, flips source health, swaps roles, inspects the CSOT.', cols: 5 },
+  {
+    id: 'auth',
+    title: '1 · Auth',
+    blurb: 'Demo accounts gate the shell. Real sign-in is stubbed in this section.',
+    wrapEvery: 4,
+    order: ['auth-login'],
+  },
+  {
+    id: 'citizen',
+    title: '2 · Citizen',
+    blurb: 'Map → briefing → alerts → report → SOS. AI Kaki is an on-demand side branch from home.',
+    wrapEvery: 4,
+    order: ['cz-home', 'cz-brief', 'cz-alerts', 'cz-report', 'cz-sos', 'cz-sos-live', 'cz-ai'],
+  },
+  {
+    id: 'responder',
+    title: '3 · Responder',
+    blurb: 'Home → mission board → join → copilot. Groups, events, log are side surfaces.',
+    wrapEvery: 4,
+    order: ['rp-home', 'rp-mboard', 'rp-join', 'rp-copilot', 'rp-groups', 'rp-events', 'rp-log'],
+  },
+  {
+    id: 'ops',
+    title: '4 · Ops',
+    blurb: 'Triage (reports → distress → cases → roster) → dispatch → declare/broadcast → audit (sources → log). Command copilot sits between dispatch and declare.',
+    wrapEvery: 4,
+    order: [
+      'ops-home',
+      'ops-reports',
+      'ops-distress',
+      'ops-cases',
+      'ops-roster',
+      'ops-dispatch',
+      'ops-copilot',
+      'ops-declare',
+      'ops-broadcast',
+      'ops-sources',
+      'ops-log',
+    ],
+  },
+  {
+    id: 'godmode',
+    title: '5 · God Mode (demo dock)',
+    blurb: 'CSOT inspector → seed scenarios → source state cycler → AI matrix → CSOT after seed.',
+    wrapEvery: 4,
+    order: ['god-csot', 'god-seed', 'god-sources', 'god-matrix', 'god-seeded'],
+  },
 ];
 
-// Flow edges. Each is a pair [fromScreenId, toScreenId, label?].
-// Edges only connect screens within the same lane (visually tractable).
-const EDGES = [
-  // Auth → first home of each role lane (rendered as cross-lane note in the UI)
-  // (Cross-lane arrows are too long visually; we annotate with a footer note instead.)
-
-  // Citizen flow
-  ['cz-home', 'cz-brief'],
-  ['cz-home', 'cz-alerts'],
-  ['cz-home', 'cz-ai'],
-  ['cz-brief', 'cz-alerts'],
-  ['cz-alerts', 'cz-report'],
-  ['cz-alerts', 'cz-sos'],
-  ['cz-report', 'cz-sos'],
-  ['cz-sos', 'cz-sos-live'],
-
-  // Responder flow
-  ['rp-home', 'rp-mboard'],
-  ['rp-mboard', 'rp-join'],
-  ['rp-mboard', 'rp-copilot'],
-  ['rp-join', 'rp-copilot'],
-  ['rp-home', 'rp-groups'],
-  ['rp-groups', 'rp-events'],
-  ['rp-mboard', 'rp-log'],
-
-  // Ops flow
-  ['ops-home', 'ops-reports'],
-  ['ops-reports', 'ops-declare'],
-  ['ops-home', 'ops-distress'],
-  ['ops-distress', 'ops-dispatch'],
-  ['ops-dispatch', 'ops-roster'],
-  ['ops-home', 'ops-cases'],
-  ['ops-cases', 'ops-dispatch'],
-  ['ops-copilot', 'ops-dispatch'],
-  ['ops-copilot', 'ops-broadcast'],
-  ['ops-declare', 'ops-broadcast'],
-  ['ops-broadcast', 'ops-sources'],
-  ['ops-sources', 'ops-log'],
-
-  // God Mode flow
-  ['god-csot', 'god-seed'],
-  ['god-seed', 'god-seeded'],
-  ['god-csot', 'god-sources'],
-  ['god-csot', 'god-matrix'],
-];
+// EDGES = consecutive pairs from each lane.order, with kind hint so the
+// renderer knows whether to draw a same-row arrow or a row-wrap arrow.
+const EDGES = [];
+for (const lane of LANES) {
+  for (let i = 0; i < lane.order.length - 1; i++) {
+    const fromCol = (i % lane.wrapEvery) + 1;
+    const fromRow = Math.floor(i / lane.wrapEvery) + 1;
+    const toCol = ((i + 1) % lane.wrapEvery) + 1;
+    const toRow = Math.floor((i + 1) / lane.wrapEvery) + 1;
+    EDGES.push({
+      from: lane.order[i],
+      to: lane.order[i + 1],
+      kind: toRow === fromRow ? 'next' : 'wrap',
+    });
+  }
+}
 
 async function main() {
   await mkdir(DOCS_DIR, { recursive: true });
 
   const files = (await readdir(SHOTS_DIR)).filter((f) => f.endsWith('.png'));
   const byMatch = new Map();
+  const byMatchDrawer = new Map();
   for (const f of files) {
     const trimmed = f.replace(/^\d+-/, '').replace(/\.png$/, '');
-    byMatch.set(trimmed, f);
+    if (trimmed.endsWith('-drawer')) {
+      byMatchDrawer.set(trimmed.replace(/-drawer$/, ''), f);
+    } else {
+      byMatch.set(trimmed, f);
+    }
+  }
+  function pickFile(match) {
+    // Prefer the drawer crop when one exists — that's where the actual
+    // workspace content lives. Fall back to the full screenshot for homes
+    // (which have no drawer open) and God Mode (which is its own dock).
+    return byMatchDrawer.get(match) ?? byMatch.get(match);
   }
 
   const dataUriCache = new Map();
@@ -435,16 +462,20 @@ async function main() {
 
   // Build per-lane screen cards
   async function renderLane(lane) {
-    const screens = Object.entries(SCREENS).filter(([, s]) => s.lane === lane.id);
     const cards = [];
-    for (const [id, s] of screens) {
-      const file = byMatch.get(s.match);
+    for (let i = 0; i < lane.order.length; i++) {
+      const id = lane.order[i];
+      const s = SCREENS[id];
+      if (!s) continue;
+      const col = (i % lane.wrapEvery) + 1;
+      const row = Math.floor(i / lane.wrapEvery) + 1;
+      const file = pickFile(s.match);
       const img = file
-        ? `<img src="${await asDataUri(file)}" alt="${s.title}" />`
+        ? `<img src="${await asDataUri(file)}" alt="${escape(s.title)}" />`
         : `<div class="placeholder">missing ${s.match}</div>`;
       const comments = s.comments.map((c) => `<li>${escape(c)}</li>`).join('');
       cards.push(`
-        <article class="screen" id="${id}" style="grid-column:${s.col};grid-row:${s.row}">
+        <article class="screen" id="${id}" style="grid-column:${col};grid-row:${row}">
           <header><span class="num">${id}</span><h3>${escape(s.title)}</h3></header>
           ${img}
           <p class="desc">${escape(s.desc)}</p>
@@ -453,7 +484,7 @@ async function main() {
       `);
     }
     return `
-      <section class="lane lane-${lane.id}" data-lane="${lane.id}" style="--cols:${lane.cols}">
+      <section class="lane lane-${lane.id}" data-lane="${lane.id}" style="--cols:${lane.wrapEvery}">
         <header class="lane-head">
           <h2><span class="lane-pill">${escape(lane.title)}</span></h2>
           <p>${escape(lane.blurb)}</p>
@@ -646,9 +677,10 @@ async function main() {
       letter-spacing: 0.02em;
     }
     .screen img {
-      width: 100%; height: 180px; object-fit: cover; object-position: top center;
+      width: 100%; height: 260px; object-fit: cover; object-position: top center;
       border-bottom: 1.5px solid var(--ink);
       display: block;
+      background: var(--paper-2);
     }
     .placeholder {
       width: 100%; height: 180px;
@@ -799,34 +831,40 @@ async function main() {
   </footer>
 
   <script>
-    // Draw arrows between screens within the same lane.
+    // Forward-only arrows. Two kinds:
+    //   'next' — source and target on the same row: straight horizontal.
+    //   'wrap' — target is on the row below: U-turn around the right edge
+    //            and back to the left to enter the next row.
     const EDGES = ${edgeData};
-    function laneOf(id) {
-      const el = document.getElementById(id);
-      return el ? el.closest('.lane') : null;
+    function rect(el, svg) {
+      const s = svg.getBoundingClientRect();
+      const r = el.getBoundingClientRect();
+      return { left: r.left - s.left, right: r.right - s.left, top: r.top - s.top, bottom: r.bottom - s.top, midX: (r.left + r.right) / 2 - s.left, midY: (r.top + r.bottom) / 2 - s.top };
     }
-    function tipPath(svg, fromEl, toEl) {
-      const svgBox = svg.getBoundingClientRect();
-      const a = fromEl.getBoundingClientRect();
-      const b = toEl.getBoundingClientRect();
-      // Right-middle of source → left-middle of target
-      let x1 = a.right - svgBox.left;
-      let y1 = a.top + a.height / 2 - svgBox.top;
-      let x2 = b.left - svgBox.left;
-      let y2 = b.top + b.height / 2 - svgBox.top;
-      // If target is to the left or below, route around the right side and down.
-      if (x2 <= x1) {
-        x1 = a.left + a.width / 2 - svgBox.left;
-        y1 = a.bottom - svgBox.top;
-        x2 = b.left + b.width / 2 - svgBox.left;
-        y2 = b.top - svgBox.top;
-      }
-      const dx = Math.abs(x2 - x1);
-      const c1x = x1 + Math.max(40, dx / 2);
-      const c1y = y1;
-      const c2x = x2 - Math.max(40, dx / 2);
-      const c2y = y2;
-      return { x1, y1, x2, y2, d: \`M\${x1},\${y1} C\${c1x},\${c1y} \${c2x},\${c2y} \${x2},\${y2}\` };
+    function nextPath(a, b) {
+      // straight horizontal from a.right to b.left, mid Y of source
+      const x1 = a.right + 6;
+      const y = a.midY;
+      const x2 = b.left - 10;
+      return 'M' + x1 + ',' + y + ' L' + x2 + ',' + y;
+    }
+    function wrapPath(a, b, svgWidth) {
+      // a is at end of its row; b is at start of next row.
+      const x1 = a.right + 6;
+      const y1 = a.midY;
+      const x2 = b.left - 10;
+      const y2 = b.midY;
+      const r = 14;
+      const outX = Math.min(svgWidth - 12, a.right + 40);
+      // right turn down, left turn back
+      return (
+        'M' + x1 + ',' + y1 +
+        ' L' + (outX - r) + ',' + y1 +
+        ' Q' + outX + ',' + y1 + ' ' + outX + ',' + (y1 + r) +
+        ' L' + outX + ',' + (y2 - r) +
+        ' Q' + outX + ',' + y2 + ' ' + (outX - r) + ',' + y2 +
+        ' L' + x2 + ',' + y2
+      );
     }
     function drawArrows() {
       const lanes = document.querySelectorAll('.lane');
@@ -834,20 +872,21 @@ async function main() {
         const svg = lane.querySelector('svg.arrows');
         if (!svg) return;
         svg.innerHTML = '';
-        // SVG uses user-space units == screen pixels (no viewBox so 1:1).
-        // arrowhead marker
         const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
-        defs.innerHTML = '<marker id="ah-' + lane.dataset.lane + '" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 Z" class="arrow-head"/></marker>';
+        defs.innerHTML = '<marker id="ah-' + lane.dataset.lane + '" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0,0 L10,5 L0,10 Z" class="arrow-head"/></marker>';
         svg.appendChild(defs);
       });
-      EDGES.forEach(([from, to]) => {
-        const fromEl = document.getElementById(from);
-        const toEl = document.getElementById(to);
+      EDGES.forEach((edge) => {
+        const fromEl = document.getElementById(edge.from);
+        const toEl = document.getElementById(edge.to);
         if (!fromEl || !toEl) return;
         const lane = fromEl.closest('.lane');
         const svg = lane ? lane.querySelector('svg.arrows') : null;
         if (!svg) return;
-        const { d } = tipPath(svg, fromEl, toEl);
+        const svgBox = svg.getBoundingClientRect();
+        const a = rect(fromEl, svg);
+        const b = rect(toEl, svg);
+        const d = edge.kind === 'wrap' ? wrapPath(a, b, svgBox.width) : nextPath(a, b);
         const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
         path.setAttribute('d', d);
         path.setAttribute('class', 'arrow-path');
