@@ -1,5 +1,5 @@
 import { useAppContext } from '../../AppContext';
-import { Bell, User, Signal, Newspaper, Activity } from 'lucide-react';
+import { Bell, User, Signal, Newspaper, Activity, ClipboardCheck } from 'lucide-react';
 
 export default function TopChrome() {
   const { role, setRole, briefingInView, sources, setDrawerContent, liveSnapshot } =
@@ -58,6 +58,15 @@ export default function TopChrome() {
             {fresh}/{fresh + stale + down}
           </span>
         </button>
+        <button
+          onClick={() => setDrawerContent('readiness')}
+          className="hidden sm:flex items-center gap-1.5 px-2 py-1 border border-border-strong shadow-[2px_2px_0px_rgba(26,26,26,1)] hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none transition-all bg-surface-0"
+        >
+          <ClipboardCheck className="w-3 h-3 text-accent-info" />
+          <span className="text-[9px] font-bold uppercase tracking-widest whitespace-nowrap">
+            Readiness
+          </span>
+        </button>
         {role === 'responder' && (
           <div className="hidden sm:flex items-center gap-1.5 px-2 py-1 border border-border-strong shadow-[2px_2px_0px_rgba(26,26,26,1)] bg-surface-0">
             <span className="w-2 h-2 bg-accent-success border border-border-strong"></span>
@@ -70,7 +79,12 @@ export default function TopChrome() {
         >
           <Bell className="w-3.5 h-3.5" />
         </button>
-        <button className="p-1.5 border border-border-strong shadow-[2px_2px_0px_rgba(26,26,26,1)] bg-surface-0">
+        <button
+          onClick={() => setDrawerContent('profile')}
+          title="Open profile"
+          aria-label="Open profile"
+          className="p-1.5 border border-border-strong shadow-[2px_2px_0px_rgba(26,26,26,1)] hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none transition-all bg-surface-0"
+        >
           <User className="w-3.5 h-3.5" />
         </button>
       </div>

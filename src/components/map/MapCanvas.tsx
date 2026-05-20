@@ -9,15 +9,9 @@ import {
   MapPin,
   Hexagon,
   MousePointer2,
-  PenTool,
   Eraser,
-  Square,
-  Circle as CircleIcon,
-  Slash,
   Undo2,
-  Redo2,
   Grid3x3,
-  Move,
 } from 'lucide-react';
 import CoveragePreview from '../primitives/CoveragePreview';
 import { severityPinSize } from '../primitives/SeverityChip';
@@ -49,6 +43,7 @@ export default function MapCanvas() {
     'select' | 'point' | 'polygon' | 'rect' | 'circle' | 'freehand' | 'erase'
   >('select');
   const [snap, setSnap] = useState(true);
+  const [acceptedPartialCells, setAcceptedPartialCells] = useState(false);
   const [draftPolygon, setDraftPolygon] = useState<LngLat[]>([]);
 
   const isDrawing = role === 'ops' && drawMode !== 'select';
@@ -375,6 +370,9 @@ export default function MapCanvas() {
   }, [role]);
 
   const drawCellCount = Math.max(1, Math.floor(draftPolygon.length * 1.6));
+  useEffect(() => {
+    setAcceptedPartialCells(false);
+  }, [draftPolygon.length]);
 
   const finishDraft = () => {
     if (draftPolygon.length >= 3) setDrawerContent('declare');
@@ -398,18 +396,11 @@ export default function MapCanvas() {
       {role === 'ops' && (
         <div className="absolute top-1/2 right-3 -translate-y-1/2 z-10 bg-white border border-black shadow-[4px_4px_0_#000] p-1 flex flex-col gap-0.5">
           <ToolBtn icon={MousePointer2} active={drawMode === 'select'} title="Select" onClick={() => setDrawMode('select')} />
-          <ToolBtn icon={MapPin} active={drawMode === 'point'} title="Point" onClick={() => setDrawMode('point')} />
-          <ToolBtn icon={Slash} active={false} title="Line" onClick={() => undefined} />
-          <ToolBtn icon={Square} active={drawMode === 'rect'} title="Rectangle" onClick={() => setDrawMode('rect')} />
-          <ToolBtn icon={CircleIcon} active={drawMode === 'circle'} title="Circle" onClick={() => setDrawMode('circle')} />
           <ToolBtn icon={Hexagon} active={drawMode === 'polygon'} title="Polygon" onClick={() => setDrawMode('polygon')} />
-          <ToolBtn icon={PenTool} active={drawMode === 'freehand'} title="Freehand" onClick={() => setDrawMode('freehand')} />
           <div className="h-px bg-black my-1" />
           <ToolBtn icon={Grid3x3} active={snap} title="Snap to cell" onClick={() => setSnap(!snap)} />
-          <ToolBtn icon={Move} active={false} title="Edit vertices" onClick={() => undefined} />
           <div className="h-px bg-black my-1" />
           <ToolBtn icon={Undo2} active={false} title="Undo" onClick={() => setDraftPolygon((p) => p.slice(0, -1))} />
-          <ToolBtn icon={Redo2} active={false} title="Redo" onClick={() => undefined} />
           <ToolBtn icon={Eraser} active={false} title="Clear" onClick={clearDraft} />
         </div>
       )}
@@ -422,7 +413,9 @@ export default function MapCanvas() {
             precision="gh5"
             estimatedDevices={drawCellCount * 680}
             estimatedResidents={drawCellCount * 2100}
-            partialCells={snap ? 0 : Math.min(2, draftPolygon.length)}
+            partialCells={snap || acceptedPartialCells ? 0 : Math.min(2, draftPolygon.length)}
+            onSnap={() => setSnap(true)}
+            onKeep={() => setAcceptedPartialCells(true)}
           />
         </div>
       )}

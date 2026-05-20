@@ -17,10 +17,13 @@ export default function GlobalActionDock() {
     responder: [
       { label: 'Toggle duty', icon: CheckCircle, action: action('duty') },
       { label: 'Verify', icon: Search, action: action('verify') },
+      { label: 'Join', icon: Radio, action: action('joinable_missions') },
+      { label: 'Events', icon: FileText, action: action('volunteer_events') },
       { label: 'Form case', icon: Target, action: action('form_case') },
     ],
     ops: [
       { label: 'Declare', icon: Shield, action: action('declare') },
+      { label: 'Zones', icon: Target, action: action('zones') },
       { label: 'Dispatch', icon: Navigation, action: action('dispatch') },
       { label: 'Broadcast', icon: Megaphone, action: action('broadcast') },
     ],

@@ -28,6 +28,7 @@ interface Props {
 export default function SlashComposer({ onSend }: Props) {
   const [value, setValue] = useState('');
   const [recording, setRecording] = useState(false);
+  const [whiteboardOpen, setWhiteboardOpen] = useState(false);
 
   const isSlash = value.startsWith('/');
   const suggestions = useMemo(() => {
@@ -85,8 +86,9 @@ export default function SlashComposer({ onSend }: Props) {
           <Mic className="w-4 h-4" />
         </button>
         <button
+          onClick={() => setWhiteboardOpen((open) => !open)}
           className="px-3 border border-border-strong shadow-[2px_2px_0px_rgba(26,26,26,1)] bg-surface-0 hover:bg-surface-2"
-          title="Open whiteboard"
+          title={whiteboardOpen ? 'Close whiteboard summary' : 'Open whiteboard summary'}
         >
           <MapIcon className="w-4 h-4" />
         </button>
@@ -102,6 +104,11 @@ export default function SlashComposer({ onSend }: Props) {
       {recording && (
         <div className="absolute -top-7 right-0 bg-accent-critical text-text-inverse px-2 py-1 text-[9px] font-mono font-bold border border-border-strong">
           REC 00:07
+        </div>
+      )}
+      {whiteboardOpen && (
+        <div className="mt-2 border border-border-strong bg-surface-2 p-2 text-[9px] uppercase font-bold tracking-widest">
+          Shared board: case map, assignments, and pinned Host outputs stay visible in this room.
         </div>
       )}
     </div>
