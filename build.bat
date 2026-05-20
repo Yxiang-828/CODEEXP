@@ -1,18 +1,32 @@
 @echo off
-REM Kampung Kaki -- one-shot install + build.
-REM Usage: build.bat
-REM Produces a production-ready dist\ folder.
+REM Kampung Kaki -- install + build locally, then deploy to Vercel.
+REM Usage:
+REM   build.bat                build + deploy production to Vercel
+REM   build.bat --no-deploy    build only (no Vercel call)
+REM   build.bat --preview      build + deploy a Vercel preview (non-prod)
 setlocal
 cd /d "%~dp0"
 
+set "DEPLOY=prod"
+:parse_args
+if "%~1"=="" goto args_done
+if /I "%~1"=="--no-deploy" set "DEPLOY=none"
+if /I "%~1"=="--preview"   set "DEPLOY=preview"
+if /I "%~1"=="-h"          goto show_help
+if /I "%~1"=="--help"      goto show_help
+shift
+goto parse_args
+:show_help
+echo usage: build.bat [--no-deploy^|--preview]
+exit /b 0
+:args_done
+
 where node >nul 2>&1
 if errorlevel 1 (
-  echo !! node.js not found. Install Node 18+ first ^(https://nodejs.org^).
+  echo !! node.js not found. Install Node 20+ first ^(https://nodejs.org^).
   exit /b 1
 )
-
-for /f %%V in ('node -v') do set NODE_VER=%%V
-echo ^>^> node: %NODE_VER%
+for /f %%V in ('node -v') do echo ^>^> node: %%V
 
 echo ^>^> installing dependencies...
 if exist package-lock.json (
@@ -25,9 +39,23 @@ if errorlevel 1 exit /b 1
 echo ^>^> building production bundle...
 call npm run build
 if errorlevel 1 exit /b 1
+echo ^>^> [OK] local build complete (dist\)
+
+if /I "%DEPLOY%"=="none" (
+  echo ^>^> skipping Vercel deploy (--no-deploy)
+  exit /b 0
+)
 
 echo.
-echo ^>^> [OK] build complete.
-echo ^>^> output: dist\
-echo ^>^> next:   run.bat           preview locally
-echo ^>^>        run.bat share     public cloudflared tunnel
+echo ^>^> deploying to Vercel (%DEPLOY%)...
+echo ^>^> first run will prompt to log in and link this folder to a project.
+
+set "VERCEL_FLAGS=--yes"
+if not "%VERCEL_TOKEN%"=="" set "VERCEL_FLAGS=%VERCEL_FLAGS% --token %VERCEL_TOKEN%"
+if /I "%DEPLOY%"=="prod" set "VERCEL_FLAGS=%VERCEL_FLAGS% --prod"
+
+call npx --yes vercel@latest %VERCEL_FLAGS%
+if errorlevel 1 exit /b 1
+
+echo.
+echo ^>^> [OK] deploy command finished. Check the URL printed above.

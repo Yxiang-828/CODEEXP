@@ -11,7 +11,7 @@ export default function TopChrome() {
           KAMPUNG KAKI
         </div>
         <div className="qa-role-chip hidden sm:flex bg-accent-warning text-text-primary text-[10px] font-black uppercase tracking-widest px-2 py-1 border border-border-strong shadow-[2px_2px_0px_rgba(26,26,26,1)] whitespace-nowrap">
-          Demo · {role}
+          {role}
         </div>
         <div className="hidden md:flex items-center gap-1.5 px-2 py-1 border border-border-strong shadow-[2px_2px_0px_rgba(26,26,26,1)] bg-surface-0">
           <Signal className={`w-3 h-3 ${liveSnapshot ? 'text-accent-success' : 'text-accent-warning'}`} />
@@ -53,8 +53,8 @@ export default function TopChrome() {
         </button>
         <button
           onClick={demoLogout}
-          title="Return to demo login"
-          aria-label="Return to demo login"
+          title="Switch role"
+          aria-label="Switch role"
           className="p-1.5 border border-border-strong shadow-[2px_2px_0px_rgba(26,26,26,1)] hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none transition-all bg-surface-0"
         >
           <LogOut className="w-3.5 h-3.5" />

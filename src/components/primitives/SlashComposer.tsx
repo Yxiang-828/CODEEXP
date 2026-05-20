@@ -103,7 +103,7 @@ export default function SlashComposer({ onSend }: Props) {
 
       {recording && (
         <div className="absolute -top-7 right-0 bg-accent-critical text-text-inverse px-2 py-1 text-[9px] font-mono font-bold border border-border-strong">
-          REC 00:07
+          REC
         </div>
       )}
       {whiteboardOpen && (

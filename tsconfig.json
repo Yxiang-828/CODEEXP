@@ -25,6 +25,7 @@
   },
   "exclude": [
     "template",
+    "CODEEXP_template",
     "node_modules",
     "dist"
   ]

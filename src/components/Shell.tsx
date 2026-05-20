@@ -8,10 +8,25 @@ import TrackingPill from './primitives/TrackingPill';
 import DemoLogin from './DemoLogin';
 import PermissionPrompt from './PermissionPrompt';
 import { useAppContext } from '../AppContext';
+import useGpsTracking from '../hooks/useGpsTracking';
 
 export default function Shell() {
   const { isAuthenticated } = useAppContext();
   if (!isAuthenticated) return <DemoLogin />;
+  return <ShellInner />;
+}
+
+function ShellInner() {
+  const { liveTracking, setSelfLocation, setLiveTracking, role, selfResponderId, updateResponderLocation } = useAppContext();
+
+  useGpsTracking({
+    enabled: liveTracking,
+    onLocation: (loc) => {
+      setSelfLocation(loc);
+      if (role === 'responder') updateResponderLocation(selfResponderId, loc);
+    },
+    onError: () => setLiveTracking(false),
+  });
 
   return (
     <div className="flex flex-col h-screen w-screen overflow-hidden bg-surface-0 font-sans">

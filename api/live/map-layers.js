@@ -94,8 +94,9 @@ async function fetchOneMapLayers(now) {
 
   if (aedResponse.ok) {
     const data = await aedResponse.json();
-    aeds.push(...themeRows(data).slice(0, 80).map((row, i) => toPoi(row, `AED-LIVE-${i}`, 'aed')).filter(Boolean));
-    sources.push(source('OneMap aed_locations', 'fresh', `${aeds.length} AED POIs returned; capped at 80 for map readability.`));
+    const sampled = spatialSample(themeRows(data), 400);
+    aeds.push(...sampled.map((row, i) => toPoi(row, `AED-LIVE-${i}`, 'aed')).filter(Boolean));
+    sources.push(source('OneMap aed_locations', 'fresh', `${aeds.length} AED POIs returned (spatially sampled island-wide).`));
   } else {
     sources.push(source('OneMap aed_locations', 'down', await shortText(aedResponse)));
   }
@@ -152,6 +153,22 @@ function guardProvider(provider, now, reason) {
   }
   hits.push({ at: now, reason });
   quota[provider] = hits;
+}
+
+function spatialSample(rows, maxTotal) {
+  const BINS = 20;
+  const lngMin = 103.60, lngMax = 104.07;
+  const buckets = Array.from({ length: BINS }, () => []);
+  for (const row of rows) {
+    const point = parseLatLng(row.LatLng);
+    if (!point) continue;
+    const bin = Math.min(BINS - 1, Math.floor((point.lng - lngMin) / (lngMax - lngMin) * BINS));
+    buckets[bin].push(row);
+  }
+  const perBin = Math.ceil(maxTotal / BINS);
+  const result = [];
+  for (const bucket of buckets) result.push(...bucket.slice(0, perBin));
+  return result.slice(0, maxTotal);
 }
 
 function themeRows(data) {

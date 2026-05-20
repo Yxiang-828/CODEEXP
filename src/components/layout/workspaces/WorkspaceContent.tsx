@@ -37,7 +37,7 @@ import {
   ActivityLogWorkspace,
   NotificationCenter,
 } from './OpsWorkspaces';
-import { GodModeWorkspace, MapLayersWorkspace } from './DemoWorkspaces';
+import { MapLayersWorkspace } from './DemoWorkspaces';
 
 const REGISTRY: Record<string, () => React.JSX.Element> = {
   local_alert: LocalAlertDetail,
@@ -71,7 +71,6 @@ const REGISTRY: Record<string, () => React.JSX.Element> = {
   readiness: ReadinessReport,
   activity_log: ActivityLogWorkspace,
   notifications: NotificationCenter,
-  god_mode: GodModeWorkspace,
   map_layers: MapLayersWorkspace,
   map_item: MapLayersWorkspace,
 };

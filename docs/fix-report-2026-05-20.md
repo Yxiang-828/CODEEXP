@@ -4,7 +4,7 @@ Repo: `CODEEXP`
 
 Production alias: https://quick-aid-sg.vercel.app
 
-Latest production deployment: https://quick-aid-71ejju540-xiangyao888-8041s-projects.vercel.app
+Latest production deployment: https://quick-aid-ja0w0q3ia-xiangyao888-8041s-projects.vercel.app
 
 ## Verification
 
@@ -14,8 +14,9 @@ Latest production deployment: https://quick-aid-71ejju540-xiangyao888-8041s-proj
   citizen SOS, citizen AI drawer, citizen report, responder accept flow, ops report queue, ops dispatch fit scoring, and activity logs.
 - Host AI route smoke passed locally with safe `not_configured` fallback.
 - Vercel production deploy completed and aliased to `https://quick-aid-sg.vercel.app`.
-- Live alias check returned HTTP 200.
-- Live `/api/host/ask` returned `not_configured`, which is correct until `OPENROUTER_API_KEY` is set in Vercel.
+- Live responder smoke passed on `https://quick-aid-sg.vercel.app`: Responder demo -> Mission Board renders Operational panel, Current mission, Assignments, and Joinable missions with no page errors.
+- Local responder flow smoke passed: Citizen SOS -> switch to responder -> Mission Board -> Accept SOS opens the assignment path.
+- Live `/api/host/ask` returned `state: live` for a citizen fire-guidance prompt with supplied location/alert context. Host AI is configured on the current production deployment.
 
 ## Fixes By Item
 
@@ -39,7 +40,21 @@ Latest production deployment: https://quick-aid-71ejju540-xiangyao888-8041s-proj
 18. Professional movements: added demo SCDF/SPF/SAF professional units, official-only restricted cases, and covert/unit labels to reduce volunteer interference.
 19. Host AI enabled: added `/api/host/ask` OpenRouter route and wired case/citizen Host AI calls. It does not invent data when provider env is missing.
 
+## Responder Template Follow-Up
+
+- Replaced the responder Mission Board drawer with a template-style Operational panel.
+- The panel now has three explicit sections: Current mission, Assignments, and Joinable missions.
+- Current mission uses actual app state: assigned SOS first, otherwise joined active case. If there is no assignment, it shows "No current mission" instead of inventing one.
+- Current mission exposes ETA, location, live updates from logs/chat, responder action buttons, case room entry, and a Message civilian control.
+- Message civilian now writes an audit log and creates a citizen notification. For case rooms, it also mirrors the message into case chat as a citizen update.
+- Joinable missions show open SOS and ops-formed case rooms with fit percentages and reasons.
+- Official/restricted professional cases are monitor-only; volunteers can open the case room for deconfliction but cannot join.
+- The responder left rail now uses clearer template-style labels: My Status, Mission Board, My Assignments, Signal Checks, Groups, Events, Logs.
+- The Mission Board drawer title now says Operational panel instead of Bulletin.
+- Accept SOS, responder status changes, join case, and leave case now make best-effort backend calls while still updating local UI/log state when the backend is unavailable.
+- Live tracking is automatically requested when a citizen has an active SOS, when a responder is assigned to an SOS, or when a responder is in an active case. If the browser denies location permission, the app does not fabricate coordinates.
+
 ## Known Configuration State
 
-- Vercel does not currently have `OPENROUTER_API_KEY` configured, so Host AI correctly shows `not_configured` on production.
+- Vercel production currently has OpenRouter Host AI configured; the live smoke test returned `state: live`.
 - I did not commit any `.env*` files or secrets.

@@ -3,16 +3,15 @@ import type React from 'react';
 import {
   ClipboardList,
   Users,
-  ShieldAlert,
   Radio,
   Map,
   Plus,
   Activity,
   Crown,
   UsersRound,
-  FlaskConical,
   ScrollText,
   MessageSquare,
+  Send,
 } from 'lucide-react';
 
 export default function LeftRail() {
@@ -21,42 +20,44 @@ export default function LeftRail() {
     setDrawerContent,
     setActiveCaseId,
     cases,
-    reports,
+    events,
     sosSessions,
-    groups,
     responders,
     selfResponderId,
+    reports,
   } = useAppContext();
   if (role === 'citizen') return null;
 
   const self = responders.find((r) => r.id === selfResponderId);
+  const pendingReports = reports.filter((r) => r.status === 'pending' || r.status === 'claimed').length;
+
+  const openMissionCount =
+    sosSessions.filter((s) => !['resolved', 'cancelled'].includes(s.status)).length +
+    cases.filter((c) => c.state !== 'resolved').length;
+  const myAssignments =
+    sosSessions.filter((s) => s.assignedResponderId === selfResponderId && !['resolved', 'cancelled'].includes(s.status)).length +
+    cases.filter((c) => c.members.includes(selfResponderId) && c.state !== 'resolved').length;
+  const signalChecks = events.filter((e) => e.status === 'verified' && !e.caseId).length;
 
   const responderQueues = [
-    { icon: Map, label: 'Bulletin', count: 5, action: () => setDrawerContent('mission_board') },
-    { icon: ClipboardList, label: 'Assignments', count: 1, action: () => setDrawerContent('assignment_detail') },
-    { icon: Radio, label: 'Joinable', action: () => setDrawerContent('joinable_missions') },
+    { icon: Activity, label: 'My Status', action: () => setDrawerContent('duty') },
+    { icon: Map, label: 'Mission Board', count: openMissionCount, action: () => setDrawerContent('mission_board') },
+    { icon: ClipboardList, label: 'My Assignments', count: myAssignments, action: () => setDrawerContent('assignment_detail') },
+    { icon: Radio, label: 'Signal Checks', count: signalChecks, action: () => setDrawerContent('verify') },
     { icon: UsersRound, label: 'Groups', count: self?.groups.length ?? 0, action: () => setDrawerContent('groups') },
     { icon: Plus, label: 'Events', action: () => setDrawerContent('volunteer_events') },
     { icon: ScrollText, label: 'Logs', action: () => setDrawerContent('activity_log') },
   ];
 
+  const activeDispatches = sosSessions.filter((s) => !['resolved', 'cancelled'].includes(s.status)).length;
+  const activeMissions = cases.filter((c) => c.state !== 'resolved').length;
   const opsQueues = [
-    { icon: FlaskConical, label: 'God Mode', action: () => setDrawerContent('god_mode') },
-    {
-      icon: ShieldAlert,
-      label: 'Reports',
-      count: reports.filter((r) => r.status === 'pending' || r.status === 'claimed').length,
-      action: () => setDrawerContent('report_queue'),
-    },
-    { icon: Map, label: 'Zones', action: () => setDrawerContent('zones') },
-    {
-      icon: Radio,
-      label: 'Distress',
-      count: sosSessions.filter((s) => !['resolved', 'cancelled'].includes(s.status)).length,
-      action: () => setDrawerContent('distress_oversight'),
-    },
-    { icon: ClipboardList, label: 'Cases', count: cases.length, action: () => setDrawerContent('case_oversight') },
+    { icon: ClipboardList, label: 'Reports', count: pendingReports, action: () => setDrawerContent('report_queue') },
+    { icon: Send, label: 'Dispatch', action: () => setDrawerContent('dispatch') },
+    { icon: Radio, label: 'Status', count: activeDispatches, action: () => setDrawerContent('distress_oversight') },
     { icon: Users, label: 'Roster', action: () => setDrawerContent('responder_oversight') },
+    { icon: Plus, label: 'New Event', action: () => setDrawerContent('declare') },
+    { icon: ClipboardList, label: 'Missions', count: activeMissions, action: () => setDrawerContent('case_oversight') },
     { icon: ScrollText, label: 'Logs', action: () => setDrawerContent('activity_log') },
   ];
 
@@ -112,18 +113,17 @@ export default function LeftRail() {
             </div>
           </div>
           <div className="flex flex-col gap-1 p-2">
-            <RoomRow label="Bulletin" short="MB" count={0} onClick={() => setDrawerContent('mission_board')} />
-            {self?.groups.map((gid) => {
-              const g = groups.find((x) => x.id === gid);
-              if (!g) return null;
-              return <RoomRow key={g.id} label={g.name} short="GR" count={0} onClick={() => setDrawerContent('groups')} />;
-            })}
+            {joinedCases.length === 0 && (
+              <p className="hidden xl:block px-1.5 py-2 text-[9px] uppercase font-bold tracking-widest text-text-secondary">
+                No active case rooms.
+              </p>
+            )}
             {joinedCases.map((c) => (
               <RoomRow
                 key={c.id}
                 label={'#' + c.name}
                 short={c.restricted ? 'OF' : 'CS'}
-                count={3}
+                count={c.members.length}
                 active
                 isCase
                 onClick={() => {
