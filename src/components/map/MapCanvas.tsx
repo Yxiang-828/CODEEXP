@@ -2,6 +2,7 @@
 // shared truth store; coordinates are real lng/lat over Singapore.
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import maplibregl, { Map, Marker, Popup } from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { useAppContext } from '../../AppContext';
@@ -12,10 +13,23 @@ import {
   Eraser,
   Undo2,
   Grid3x3,
+  Siren,
+  Hospital,
+  Zap,
+  TrafficCone,
+  Train,
+  Flame,
+  Waves,
+  HeartPulse,
+  Car,
+  TriangleAlert,
+  CloudRain,
+  CircleHelp,
 } from 'lucide-react';
 import CoveragePreview from '../primitives/CoveragePreview';
 import { severityPinSize } from '../primitives/SeverityChip';
 import type { LngLat } from '../../AppContext';
+import { fetchMapLayers, type LiveMapLayers, type MapPoi } from '../../services/mapLayers';
 
 // OneMap SG public basemap tiles. CORS-enabled, no key.
 const ONEMAP_GREY = 'https://www.onemap.gov.sg/maps/tiles/Grey/{z}/{x}/{y}.png';
@@ -23,10 +37,60 @@ const ONEMAP_DEFAULT = 'https://www.onemap.gov.sg/maps/tiles/Default/{z}/{x}/{y}
 
 const SG_CENTER: [number, number] = [103.8198, 1.3521];
 
+const DEMO_HOSPITAL_POIS: MapPoi[] = [
+  { id: 'H-SGH', name: 'SGH', detail: 'Hospital · demo fallback', lng: 103.8359, lat: 1.2806, source: 'demo' },
+  { id: 'H-CGH', name: 'CGH', detail: 'Hospital · demo fallback', lng: 103.9493, lat: 1.3401, source: 'demo' },
+  { id: 'H-TTSH', name: 'TTSH', detail: 'Hospital · demo fallback', lng: 103.8469, lat: 1.3214, source: 'demo' },
+  { id: 'H-NUH', name: 'NUH', detail: 'Hospital · demo fallback', lng: 103.7836, lat: 1.2949, source: 'demo' },
+  { id: 'H-KTPH', name: 'KTPH', detail: 'Hospital · demo fallback', lng: 103.8386, lat: 1.4245, source: 'demo' },
+];
+
+const DEMO_AED_POIS: MapPoi[] = [
+  { id: 'AED-CITYHALL', name: 'AED', detail: 'Public AED · demo fallback', lng: 103.8521, lat: 1.2931, source: 'demo' },
+  { id: 'AED-SGH', name: 'AED', detail: 'Public AED · demo fallback', lng: 103.8322, lat: 1.2848, source: 'demo' },
+  { id: 'AED-BEDOK', name: 'AED', detail: 'Public AED · demo fallback', lng: 103.9298, lat: 1.324, source: 'demo' },
+  { id: 'AED-JE', name: 'AED', detail: 'Public AED · demo fallback', lng: 103.7423, lat: 1.3331, source: 'demo' },
+];
+
+const DEMO_TRAFFIC_POIS: MapPoi[] = [
+  { id: 'TR-AYE', name: 'AYE crash', detail: 'Traffic incident · demo fallback', lng: 103.79, lat: 1.28, tone: 'critical', source: 'demo' },
+  { id: 'TR-CTE', name: 'CTE slow', detail: 'Speed band · demo fallback', lng: 103.843, lat: 1.329, tone: 'warning', source: 'demo' },
+  { id: 'TR-PIE', name: 'PIE heavy', detail: 'Speed band · demo fallback', lng: 103.882, lat: 1.337, tone: 'warning', source: 'demo' },
+  { id: 'TR-ECP', name: 'ECP clear', detail: 'Speed band · demo fallback', lng: 103.905, lat: 1.304, tone: 'ok', source: 'demo' },
+];
+
+const MRT_STATUS = [
+  {
+    id: 'MRT-EW',
+    name: 'EWL crowding',
+    detail: 'MRT congestion · no live source wired',
+    tone: 'warning',
+    path: [
+      [103.7423, 1.3331],
+      [103.772, 1.317],
+      [103.8198, 1.307],
+      [103.8521, 1.2931],
+      [103.9493, 1.3401],
+    ],
+  },
+  {
+    id: 'MRT-NS',
+    name: 'NSL normal',
+    detail: 'MRT congestion · no live source wired',
+    tone: 'ok',
+    path: [
+      [103.8386, 1.4245],
+      [103.8469, 1.3214],
+      [103.8521, 1.2931],
+    ],
+  },
+];
+
 export default function MapCanvas() {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<Map | null>(null);
   const markerStore = useRef<Marker[]>([]);
+  const hoverPopupStore = useRef<Popup[]>([]);
   const polygonSourceIds = useRef<string[]>([]);
 
   const {
@@ -37,6 +101,7 @@ export default function MapCanvas() {
     cases,
     setSelectedId,
     setDrawerContent,
+    setSelectedMapItem,
   } = useAppContext();
 
   const [drawMode, setDrawMode] = useState<
@@ -45,8 +110,49 @@ export default function MapCanvas() {
   const [snap, setSnap] = useState(true);
   const [acceptedPartialCells, setAcceptedPartialCells] = useState(false);
   const [draftPolygon, setDraftPolygon] = useState<LngLat[]>([]);
+  const [liveLayers, setLiveLayers] = useState<LiveMapLayers | null>(null);
+  const [layerStatus, setLayerStatus] = useState<'loading' | 'live' | 'demo' | 'partial'>('loading');
 
   const isDrawing = role === 'ops' && drawMode !== 'select';
+
+  useEffect(() => {
+    let alive = true;
+    const pull = async () => {
+      try {
+        const layers = await fetchMapLayers();
+        if (!alive) return;
+        setLiveLayers(layers);
+        if (!layers) {
+          setLayerStatus('demo');
+          return;
+        }
+        const liveCount =
+          layers.hospitals.length +
+          layers.aeds.length +
+          layers.traffic.length +
+          layers.speedBands.length;
+        const configuredSources = layers.sources.filter((s) => s.state === 'fresh').length;
+        setLayerStatus(liveCount > 0 && configuredSources > 0 ? 'live' : 'partial');
+      } catch {
+        if (alive) setLayerStatus('demo');
+      }
+    };
+    pull();
+    const timer = setInterval(pull, 5 * 60_000);
+    return () => {
+      alive = false;
+      clearInterval(timer);
+    };
+  }, []);
+
+  const hospitalPois = liveLayers?.hospitals.length ? liveLayers.hospitals : DEMO_HOSPITAL_POIS;
+  const allAedPois = liveLayers?.aeds.length ? liveLayers.aeds : DEMO_AED_POIS;
+  const allTrafficPois = liveLayers && (liveLayers.traffic.length || liveLayers.speedBands.length)
+    ? [...liveLayers.traffic, ...liveLayers.speedBands].slice(0, 120)
+    : DEMO_TRAFFIC_POIS;
+  const mrtStatus = liveLayers?.mrt.length ? liveLayers.mrt : MRT_STATUS;
+  const aedPois = allAedPois.slice(0, 80);
+  const trafficPois = allTrafficPois.slice(0, 120);
 
   // ---- map init ----
   useEffect(() => {
@@ -158,6 +264,29 @@ export default function MapCanvas() {
         },
       });
 
+      map.addSource('mrt-status-lines', {
+        type: 'geojson',
+        data: { type: 'FeatureCollection', features: [] },
+      });
+      map.addLayer({
+        id: 'mrt-status-lines-layer',
+        type: 'line',
+        source: 'mrt-status-lines',
+        paint: {
+          'line-color': [
+            'match',
+            ['get', 'tone'],
+            'warning', '#FEF08A',
+            'critical', '#EF4444',
+            'ok', '#4ADE80',
+            '#1A1A1A',
+          ],
+          'line-width': 4,
+          'line-opacity': 0.75,
+          'line-dasharray': [2, 1],
+        },
+      });
+
       map.addSource('draft', {
         type: 'geojson',
         data: { type: 'FeatureCollection', features: [] },
@@ -178,6 +307,8 @@ export default function MapCanvas() {
 
     mapRef.current = map;
     return () => {
+      for (const popup of hoverPopupStore.current) popup.remove();
+      hoverPopupStore.current = [];
       map.remove();
       mapRef.current = null;
     };
@@ -265,6 +396,16 @@ export default function MapCanvas() {
             .filter(Boolean) as GeoJSON.Feature[],
         } as GeoJSON.FeatureCollection);
 
+      m.getSource('mrt-status-lines') &&
+        (m.getSource('mrt-status-lines') as maplibregl.GeoJSONSource).setData({
+          type: 'FeatureCollection',
+          features: mrtStatus.map((line) => ({
+            type: 'Feature',
+            geometry: { type: 'LineString', coordinates: line.path },
+            properties: { id: line.id, tone: line.tone },
+          })),
+        } as GeoJSON.FeatureCollection);
+
       // draft polygon
       m.getSource('draft') &&
         (m.getSource('draft') as maplibregl.GeoJSONSource).setData({
@@ -288,6 +429,8 @@ export default function MapCanvas() {
         } as GeoJSON.FeatureCollection);
 
       // markers
+      for (const popup of hoverPopupStore.current) popup.remove();
+      hoverPopupStore.current = [];
       for (const mk of markerStore.current) mk.remove();
       markerStore.current = [];
 
@@ -304,10 +447,9 @@ export default function MapCanvas() {
         el.className = pinClass(e.severity);
         el.style.width = sz + 'px';
         el.style.height = sz + 'px';
-        el.title = e.title + (e.liveValue ? ' · ' + e.liveValue : '');
-        el.innerHTML = `<span style="font-size:9px;font-weight:900;font-family:ui-monospace">${
-          e.kind === 'fire' ? 'F' : e.kind === 'flood' ? '~' : e.kind === 'crash' ? '!' : e.kind === 'medical' ? '+' : e.kind === 'weather' ? '°' : 'i'
-        }</span>`;
+        const classification = e.kind.toUpperCase();
+        el.title = `${classification} · ${e.title}${e.liveValue ? ' · ' + e.liveValue : ''}`;
+        el.innerHTML = mapIconMarkup(eventIcon(e.kind), 15);
         el.onclick = (ev) => {
           ev.stopPropagation();
           setSelectedId(e.id);
@@ -360,8 +502,103 @@ export default function MapCanvas() {
           .addTo(m);
         markerStore.current.push(marker);
       }
+
+      for (const h of hospitalPois) {
+        markerStore.current.push(
+          addIconMarker(m, [h.lng, h.lat], {
+            title: h.name,
+            body: h.detail,
+            tone: 'hospital',
+            icon: Hospital,
+            label: 'Hospital',
+            medium: false,
+            popupStore: hoverPopupStore.current,
+            onClick: () => {
+              setSelectedMapItem(toSelectedMapItem(h, 'Hospital', 'OneMap'));
+              setDrawerContent('map_item');
+            },
+          })
+        );
+      }
+
+      for (const aed of aedPois) {
+        markerStore.current.push(
+          addIconMarker(m, [aed.lng, aed.lat], {
+            title: aed.name,
+            body: aed.detail,
+            tone: 'aed',
+            icon: Zap,
+            label: 'AED',
+            medium: false,
+            popupStore: hoverPopupStore.current,
+            onClick: () => {
+              setSelectedMapItem(toSelectedMapItem(aed, 'AED', 'OneMap'));
+              setDrawerContent('map_item');
+            },
+          })
+        );
+      }
+
+      for (const traffic of trafficPois) {
+        markerStore.current.push(
+          addIconMarker(m, [traffic.lng, traffic.lat], {
+            title: traffic.name,
+            body: traffic.detail,
+            tone: traffic.tone,
+            icon: TrafficCone,
+            label: traffic.tone === 'ok' ? 'Traffic OK' : 'Traffic',
+            medium: false,
+            popupStore: hoverPopupStore.current,
+            onClick: () => {
+              setSelectedMapItem(toSelectedMapItem(traffic, 'Traffic', 'LTA DataMall'));
+              setDrawerContent('map_item');
+            },
+          })
+        );
+      }
+
+      for (const line of mrtStatus) {
+        const mid = line.path[Math.floor(line.path.length / 2)];
+        markerStore.current.push(
+          addIconMarker(m, mid as [number, number], {
+            title: line.name,
+            body: line.detail,
+            tone: line.tone,
+            icon: Train,
+            label: 'MRT',
+            medium: false,
+            popupStore: hoverPopupStore.current,
+            onClick: () => {
+              setSelectedMapItem({
+                id: line.id,
+                category: 'MRT',
+                title: line.name,
+                detail: line.detail,
+                source: line.source === 'live' ? 'Live transit feed' : 'Demo status',
+                lng: mid[0],
+                lat: mid[1],
+                tone: line.tone,
+              });
+              setDrawerContent('map_item');
+            },
+          })
+        );
+      }
     }
-  }, [events, responders, sosSessions, cases, draftPolygon, setDrawerContent, setSelectedId]);
+  }, [
+    events,
+    responders,
+    sosSessions,
+    cases,
+    draftPolygon,
+    setDrawerContent,
+    setSelectedId,
+    setSelectedMapItem,
+    hospitalPois,
+    aedPois,
+    trafficPois,
+    mrtStatus,
+  ]);
 
   // capture latest role in ref for marker click handlers
   const roleRef = useRef(role);
@@ -389,7 +626,15 @@ export default function MapCanvas() {
 
       {/* viewport label */}
       <div className="absolute top-3 left-3 z-10 bg-black text-white px-2 py-1 text-[9px] font-bold tracking-widest uppercase shadow-[3px_3px_0_#000] border border-black">
-        MAP · SG · {role.toUpperCase()}
+        MAP · SG · {role.toUpperCase()} · {layerStatus.toUpperCase()}
+      </div>
+
+      <div className="absolute top-12 left-3 z-10 bg-white border border-black shadow-[3px_3px_0_#000] px-2 py-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 max-w-[360px]">
+        <LegendItem icon={Siren} label="Disaster" />
+        <LegendItem icon={Hospital} label="Hospital" />
+        <LegendItem icon={Zap} label="AED" />
+        <LegendItem icon={TrafficCone} label="Traffic" />
+        <LegendItem icon={Train} label="MRT" />
       </div>
 
       {/* drawing toolbar (ops only) */}
@@ -430,6 +675,95 @@ export default function MapCanvas() {
         </button>
       )}
     </div>
+  );
+}
+
+function addIconMarker(
+  map: maplibregl.Map,
+  lngLat: [number, number],
+  opts: {
+    title: string;
+    body: string;
+    tone: string;
+    icon: typeof Hospital;
+    label: string;
+    medium: boolean;
+    popupStore: Popup[];
+    onClick: () => void;
+  }
+) {
+  const el = document.createElement('button');
+  el.className = `qa-poi-marker qa-poi-${opts.tone} ${!opts.medium ? 'qa-poi-compact' : ''} ${
+    opts.medium ? 'qa-poi-medium' : ''
+  }`;
+  el.type = 'button';
+  el.setAttribute('aria-label', `${opts.label}: ${opts.title}`);
+  el.title = `${opts.title} · ${opts.body}`;
+  el.innerHTML = `<span aria-hidden="true">${mapIconMarkup(opts.icon, 16)}</span>${
+    opts.medium ? `<strong>${opts.label}</strong>` : ''
+  }`;
+  const popup = new Popup({ offset: 12, closeButton: false, className: 'qa-hover-popup' }).setHTML(
+    `<div style="font-family:ui-sans-serif;max-width:240px"><strong style="display:block;font-size:11px;text-transform:uppercase;letter-spacing:.08em">${escapeHtml(
+      opts.title
+    )}</strong><span style="display:block;font-size:10px;margin-top:4px">${escapeHtml(opts.body)}</span></div>`
+  );
+  opts.popupStore.push(popup);
+  const showPopup = () => popup.setLngLat(lngLat).addTo(map);
+  const hidePopup = () => popup.remove();
+  el.addEventListener('pointerenter', showPopup);
+  el.addEventListener('pointerleave', hidePopup);
+  el.addEventListener('blur', hidePopup);
+  el.onclick = (ev) => {
+    ev.stopPropagation();
+    hidePopup();
+    opts.onClick();
+  };
+  return new maplibregl.Marker({ element: el, anchor: 'left' }).setLngLat(lngLat).addTo(map);
+}
+
+function toSelectedMapItem(item: MapPoi, category: string, fallbackSource: string) {
+  return {
+    id: item.id,
+    category,
+    title: item.name,
+    detail: item.detail,
+    source: item.source === 'live' ? fallbackSource : 'Demo fallback',
+    lng: item.lng,
+    lat: item.lat,
+    tone: item.tone,
+  };
+}
+
+function escapeHtml(value: string) {
+  return value.replace(/[&<>"']/g, (char) => {
+    if (char === '&') return '&amp;';
+    if (char === '<') return '&lt;';
+    if (char === '>') return '&gt;';
+    if (char === '"') return '&quot;';
+    return '&#039;';
+  });
+}
+
+function eventIcon(kind: string) {
+  if (kind === 'fire') return Flame;
+  if (kind === 'flood') return Waves;
+  if (kind === 'medical') return HeartPulse;
+  if (kind === 'crash') return Car;
+  if (kind === 'hazard') return TriangleAlert;
+  if (kind === 'weather') return CloudRain;
+  return CircleHelp;
+}
+
+function mapIconMarkup(Icon: typeof Hospital, size: number) {
+  return renderToStaticMarkup(<Icon size={size} strokeWidth={3} />);
+}
+
+function LegendItem({ icon: Icon, label }: { icon: typeof MapPin; label: string }) {
+  return (
+    <span className="flex items-center gap-1 text-[8px] font-black uppercase tracking-widest whitespace-nowrap">
+      <Icon className="w-3 h-3" />
+      {label}
+    </span>
   );
 }
 

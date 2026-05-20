@@ -1,5 +1,7 @@
-// Live data adapters — real public APIs, no keys required.
-// data.gov.sg public realtime APIs are CORS-enabled and free.
+// Live data adapters: real public APIs only.
+// Calls are quota-guarded because Host/AI tooling must never burn provider quotas by looping.
+
+import { ProviderRateLimitError, guardProviderCall } from './providerQuota';
 
 export interface PsiReading {
   region: 'national' | 'north' | 'south' | 'east' | 'west' | 'central';
@@ -34,6 +36,7 @@ const REGION_COORDS: Record<string, { lng: number; lat: number }> = {
 
 export async function fetchPsi(): Promise<PsiReading[]> {
   try {
+    guardProviderCall('datagov', 'NEA PSI overlay');
     const r = await fetch('https://api.data.gov.sg/v1/environment/psi');
     if (!r.ok) throw new Error(String(r.status));
     const j = await r.json();
@@ -53,13 +56,14 @@ export async function fetchPsi(): Promise<PsiReading[]> {
     }
     return out;
   } catch (e) {
-    console.warn('fetchPsi failed', e);
+    logLiveFailure('fetchPsi', e);
     return [];
   }
 }
 
 export async function fetchRainfall(): Promise<RainfallReading[]> {
   try {
+    guardProviderCall('datagov', 'NEA rainfall overlay');
     const r = await fetch('https://api.data.gov.sg/v1/environment/rainfall');
     if (!r.ok) throw new Error(String(r.status));
     const j = await r.json();
@@ -76,13 +80,14 @@ export async function fetchRainfall(): Promise<RainfallReading[]> {
       mm: byStation.get(s.id) ?? 0,
     }));
   } catch (e) {
-    console.warn('fetchRainfall failed', e);
+    logLiveFailure('fetchRainfall', e);
     return [];
   }
 }
 
 export async function fetch2hForecast(): Promise<ForecastArea[]> {
   try {
+    guardProviderCall('datagov', 'NEA 2-hour forecast overlay');
     const r = await fetch('https://api.data.gov.sg/v1/environment/2-hour-weather-forecast');
     if (!r.ok) throw new Error(String(r.status));
     const j = await r.json();
@@ -98,7 +103,7 @@ export async function fetch2hForecast(): Promise<ForecastArea[]> {
       forecast: byArea.get(a.name) ?? 'No data',
     }));
   } catch (e) {
-    console.warn('fetch2hForecast failed', e);
+    logLiveFailure('fetch2hForecast', e);
     return [];
   }
 }
@@ -117,4 +122,12 @@ export async function fetchLiveSnapshot(): Promise<LiveSnapshot> {
     fetch2hForecast(),
   ]);
   return { psi, rainfall, forecast, fetchedAt: Date.now() };
+}
+
+function logLiveFailure(scope: string, error: unknown) {
+  if (error instanceof ProviderRateLimitError) {
+    console.warn(scope, error.userMessage);
+    return;
+  }
+  console.warn(scope + ' failed', error);
 }

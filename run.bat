@@ -1,5 +1,5 @@
 @echo off
-REM Quick Aid SG -- build + serve.
+REM Kampung Kaki -- build + serve.
 REM Usage:
 REM   run.bat            build + preview on 5173 (production)
 REM   run.bat dev        dev server on 3000 (hot reload)
@@ -36,7 +36,7 @@ if /i "%MODE%"=="share" (
   call npm run build
   if errorlevel 1 exit /b 1
   echo ^>^> starting preview on http://0.0.0.0:5173
-  start "QuickAid Preview" cmd /c "npx vite preview --host 0.0.0.0 --port 5173"
+  start "Kampung Kaki Preview" cmd /c "npx vite preview --host 0.0.0.0 --port 5173"
   timeout /t 3 /nobreak >nul
   echo.
   echo ^>^> opening public tunnel (cloudflared)...

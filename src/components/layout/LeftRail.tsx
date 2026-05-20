@@ -11,7 +11,7 @@ import {
   Activity,
   Crown,
   UsersRound,
-  ClipboardCheck,
+  FlaskConical,
 } from 'lucide-react';
 
 export default function LeftRail() {
@@ -45,6 +45,7 @@ export default function LeftRail() {
   ];
 
   const opsQueues = [
+    { icon: FlaskConical, label: 'God Mode', action: () => setDrawerContent('god_mode') },
     {
       icon: ShieldAlert,
       label: 'Reports',
@@ -60,7 +61,6 @@ export default function LeftRail() {
     },
     { icon: ClipboardList, label: 'Cases', count: cases.length, action: () => setDrawerContent('case_oversight') },
     { icon: Users, label: 'Roster', action: () => setDrawerContent('responder_oversight') },
-    { icon: ClipboardCheck, label: 'Truth', action: () => setDrawerContent('readiness') },
   ];
 
   const queues = role === 'responder' ? responderQueues : opsQueues;

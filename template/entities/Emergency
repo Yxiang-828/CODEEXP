@@ -1,0 +1,108 @@
+{
+  "name": "Emergency",
+  "type": "object",
+  "properties": {
+    "title": {
+      "type": "string",
+      "description": "Short title of the emergency"
+    },
+    "description": {
+      "type": "string",
+      "description": "Detailed description"
+    },
+    "category": {
+      "type": "string",
+      "enum": [
+        "medical",
+        "fire",
+        "accident",
+        "crime",
+        "natural_disaster",
+        "infrastructure",
+        "other"
+      ],
+      "description": "Type of emergency"
+    },
+    "severity": {
+      "type": "string",
+      "enum": [
+        "low",
+        "medium",
+        "high",
+        "critical"
+      ],
+      "description": "Severity level"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "reported",
+        "acknowledged",
+        "responding",
+        "resolved",
+        "closed"
+      ],
+      "default": "reported",
+      "description": "Current status"
+    },
+    "reporter_name": {
+      "type": "string",
+      "description": "Name of person who reported"
+    },
+    "reporter_phone": {
+      "type": "string",
+      "description": "Reporter contact phone"
+    },
+    "latitude": {
+      "type": "number",
+      "description": "Location latitude"
+    },
+    "longitude": {
+      "type": "number",
+      "description": "Location longitude"
+    },
+    "address": {
+      "type": "string",
+      "description": "Human readable address"
+    },
+    "assigned_responders": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "IDs of assigned responders"
+    },
+    "image_url": {
+      "type": "string",
+      "description": "Photo of the emergency"
+    },
+    "notes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "author": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          },
+          "timestamp": {
+            "type": "string"
+          }
+        }
+      },
+      "description": "Activity notes and updates"
+    },
+    "resolved_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When the emergency was resolved"
+    }
+  },
+  "required": [
+    "title",
+    "category",
+    "severity"
+  ]
+}

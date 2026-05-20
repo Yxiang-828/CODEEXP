@@ -34,6 +34,7 @@ import {
   ZoneManager,
   ReadinessReport,
 } from './OpsWorkspaces';
+import { GodModeWorkspace, MapLayersWorkspace } from './DemoWorkspaces';
 
 const REGISTRY: Record<string, () => React.JSX.Element> = {
   local_alert: LocalAlertDetail,
@@ -64,6 +65,9 @@ const REGISTRY: Record<string, () => React.JSX.Element> = {
   source_health: SourceHealth,
   zones: ZoneManager,
   readiness: ReadinessReport,
+  god_mode: GodModeWorkspace,
+  map_layers: MapLayersWorkspace,
+  map_item: MapLayersWorkspace,
 };
 
 export default function WorkspaceContent({ id }: { id: string }) {

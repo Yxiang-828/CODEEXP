@@ -1,8 +1,8 @@
-# Quick Aid SG — Blueprint
+# Kampung Kaki — Blueprint
 
 Current state of the design. Replaces the legacy blueprint at
-`BLUEPRINT.legacy.md`. This document is the single answer to "what is Quick
-Aid right now". Updated 2026-05-19.
+`BLUEPRINT.legacy.md`. This document is the single answer to "what is Kampung
+Kaki right now". Updated 2026-05-19.
 
 ---
 
@@ -240,7 +240,7 @@ for full probe receipts (HTTP status, sample payloads, CORS headers).
 
 ## 0.B Mission and the response loop
 
-**Hackathon problem (Mission: Quick Aid · Topic: Fast Response):**
+**Hackathon problem (Mission: Kampung Kaki · Topic: Fast Response):**
 "Build a web application that gathers information from different sources
 to help Singapore respond faster and smarter during disasters or health
 emergencies."
@@ -505,7 +505,7 @@ These are measurable. If we can't hit them we ship with a known gap.
 
 ## 0.E Plug Socket Philosophy
 
-Quick Aid is responder-agnostic infrastructure. It works without
+Kampung Kaki is responder-agnostic infrastructure. It works without
 privileged access, and gets stronger when agencies plug in.
 
 | Mode | What works | Integration style | Data tiers active |

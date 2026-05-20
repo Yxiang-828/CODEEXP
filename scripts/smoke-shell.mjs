@@ -16,11 +16,10 @@ const visibleText = async (text) => {
 
 try {
   await page.goto(baseURL, { waitUntil: 'networkidle' });
-  await visibleText('QUICK AID SG');
-
-  await clickText('Readiness');
-  await visibleText('Shell readiness');
-  await visibleText('Template algorithm ports');
+  await visibleText('KAMPUNG KAKI');
+  await visibleText('Auto-login workspace');
+  await clickText('Citizen demo');
+  await visibleText('Demo · citizen');
 
   await clickText('Report');
   await clickText('Emergency report form');
@@ -37,7 +36,9 @@ try {
   await visibleText('My alerts');
   await visibleText('Nearby emergencies');
 
-  await page.locator('select').first().selectOption('responder');
+  await page.getByTitle('Return to demo login').click();
+  await clickText('Responder demo');
+  await visibleText('Demo · responder');
   await clickText('Join');
   await visibleText('Joinable missions');
   const accept = page.getByText('Accept SOS', { exact: false }).first();
@@ -47,7 +48,13 @@ try {
   await page.getByTitle('Open profile').click();
   await visibleText('Profile');
 
-  await page.locator('select').first().selectOption('ops');
+  await page.getByTitle('Return to demo login').click();
+  await clickText('Ops demo');
+  await visibleText('Demo · ops');
+  await clickText('God Mode');
+  await visibleText('God Mode');
+  await clickText('Medical SOS surge');
+  await visibleText('Distress oversight');
   await clickText('Zones');
   await visibleText('Emergency zones');
   await clickText('Create demo drawn zone');
@@ -58,9 +65,6 @@ try {
   await visibleText('Geo broadcast');
   await clickText('Send broadcast');
   await visibleText('Broadcast queued');
-  await clickText('Truth');
-  await visibleText('Shell readiness');
-
   console.log('shell smoke passed');
 } finally {
   await browser.close();

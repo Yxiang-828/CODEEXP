@@ -15,7 +15,7 @@ export function LocalAlertDetail() {
   const shareAlert = async () => {
     const text = `${event.title} · ${event.source} · ${event.location.lat.toFixed(4)}N ${event.location.lng.toFixed(4)}E`;
     if (navigator.share) {
-      await navigator.share({ title: 'Quick Aid SG alert', text }).catch(() => undefined);
+      await navigator.share({ title: 'Kampung Kaki alert', text }).catch(() => undefined);
     } else if (navigator.clipboard) {
       await navigator.clipboard.writeText(text).catch(() => undefined);
     }

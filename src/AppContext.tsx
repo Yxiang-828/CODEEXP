@@ -16,6 +16,7 @@ import { fetchLiveSnapshot, type LiveSnapshot } from './services/live';
 
 export type Role = 'citizen' | 'responder' | 'ops';
 export type ShellState = 'S0' | 'S2' | 'S4' | 'S6' | 'S9';
+export type DemoScenario = 'medical_sos' | 'flood_zone' | 'traffic_case' | 'volunteer_drive';
 
 export interface LngLat {
   lng: number;
@@ -172,9 +173,23 @@ export interface TrackingState {
   drawerId?: string;
 }
 
+export interface SelectedMapItem {
+  id: string;
+  category: string;
+  title: string;
+  detail: string;
+  source: string;
+  lng: number;
+  lat: number;
+  tone?: string;
+}
+
 interface AppState {
+  isAuthenticated: boolean;
   role: Role;
   setRole: (r: Role) => void;
+  demoLogin: (r: Role) => void;
+  demoLogout: () => void;
   drawerContent: string | null;
   setDrawerContent: (id: string | null) => void;
   shellState: ShellState;
@@ -199,6 +214,8 @@ interface AppState {
   setActiveCaseId: (id: string | null) => void;
   tracking: TrackingState | null;
   setTracking: (t: TrackingState | null) => void;
+  selectedMapItem: SelectedMapItem | null;
+  setSelectedMapItem: (item: SelectedMapItem | null) => void;
 
   briefingInView: number;
   selfResponderId: string;
@@ -231,6 +248,7 @@ interface AppState {
   leaveGroup: (groupId: string, responderId: string) => void;
   joinCase: (caseId: string, responderId: string) => void;
   leaveCase: (caseId: string, responderId: string) => void;
+  runDemoScenario: (scenario: DemoScenario) => void;
 }
 
 const AppContext = createContext<AppState | undefined>(undefined);
@@ -539,7 +557,7 @@ const seed = {
     { id: 'src-7', name: 'Reports intake', state: 'fresh', lastAgeS: 5 },
     {
       id: 'src-8',
-      name: 'Quick Aid backend',
+      name: 'Kampung Kaki backend',
       state: 'shell_only',
       lastAgeS: 0,
       note: 'Express/WebSocket persistence not wired yet.',
@@ -583,6 +601,7 @@ const seed = {
 };
 
 export const AppProvider = ({ children }: { children: ReactNode }) => {
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [role, setRole] = useState<Role>('citizen');
   const [drawerContent, setDrawerContentRaw] = useState<string | null>(null);
   const [shellState, setShellState] = useState<ShellState>('S0');
@@ -603,14 +622,30 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [activeCaseId, setActiveCaseId] = useState<string | null>(null);
   const [tracking, setTracking] = useState<TrackingState | null>(null);
+  const [selectedMapItem, setSelectedMapItem] = useState<SelectedMapItem | null>(null);
 
   const setDrawerContent = useCallback((id: string | null) => {
     setDrawerContentRaw(id);
     setShellState(id ? 'S2' : 'S0');
   }, []);
 
-  // Pull live data on mount + refresh every 60s
+  const demoLogin: AppState['demoLogin'] = (nextRole) => {
+    setRole(nextRole);
+    setIsAuthenticated(true);
+    setDrawerContentRaw(null);
+    setShellState('S0');
+  };
+
+  const demoLogout: AppState['demoLogout'] = () => {
+    setIsAuthenticated(false);
+    setDrawerContentRaw(null);
+    setShellState('S0');
+    setTracking(null);
+  };
+
+  // Live provider fetch is opt-in. This prevents the shell from burning real API quota on load.
   useEffect(() => {
+    if (import.meta.env.VITE_ENABLE_LIVE_PROVIDER_FETCH !== 'true') return;
     let alive = true;
     const pull = async () => {
       const snap = await fetchLiveSnapshot();
@@ -878,11 +913,11 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       text = 'Case ALPHA-09 · active 1h · 2 responders on scene · no new SOS pings within 200 m.';
       chips = [{ label: 'tool: case_state', ref: 'active' }, { label: 'tool: roster', ref: '2/4' }];
     } else if (q.includes('aed') || q.includes('nearest')) {
-      text = 'Nearest AED: Blk 219 Bedok North St 1 · 220 m · load OK.';
-      chips = [{ label: 'tool: resource_lookup', ref: 'AED 220m' }, { label: 'tool: route', ref: '4min' }];
+      text = 'Nearest AED unavailable: OneMap theme retrieval is configured for backend integration but is not wired into Host yet. No guessed AED is shown.';
+      chips = [{ label: 'tool: onemap_theme', ref: 'unavailable' }];
     } else if (q.includes('hospital')) {
-      text = 'CGH 71% · SGH 84% · KTPH 62%. Recommend KTPH for handoff.';
-      chips = [{ label: 'tool: hospital_load', ref: 'live' }];
+      text = 'Hospital load unavailable: no real live hospital-load source is configured. No fake wait time or load ranking is shown.';
+      chips = [{ label: 'tool: hospital_load', ref: 'unavailable' }];
     } else if (q.includes('weather') || q.includes('psi')) {
       const psi = liveSnapshot?.psi[0];
       text = psi
@@ -945,6 +980,163 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     );
   };
 
+  const runDemoScenario: AppState['runDemoScenario'] = (scenario) => {
+    const now = Date.now();
+    if (scenario === 'medical_sos') {
+      const sosId = newId('DEMO-SOS');
+      setSosSessions((prev) => [
+        {
+          id: sosId,
+          citizenName: 'DEMO_PATIENT',
+          category: 'medical',
+          location: { lng: 103.852, lat: 1.293 },
+          status: 'requesting',
+          startedAt: now,
+        },
+        ...prev,
+      ]);
+      setReports((prev) => [
+        {
+          id: newId('DEMO-REP'),
+          kind: 'medical',
+          title: 'DEMO · Collapse near City Hall MRT',
+          body: 'Demo injection for SOS intake, AED lookup, dispatch, and responder tracking.',
+          location: { lng: 103.852, lat: 1.293 },
+          reporterTrust: 1,
+          status: 'pending',
+          createdAt: now,
+        },
+        ...prev,
+      ]);
+      setTracking({
+        kind: 'DEMO SOS',
+        title: 'Injected medical SOS · awaiting dispatch',
+        eta: 'demo',
+        progress: 0.15,
+        tone: 'critical',
+        drawerId: 'distress_oversight',
+      });
+      setSelectedId(sosId);
+      setDrawerContent('distress_oversight');
+      return;
+    }
+
+    if (scenario === 'flood_zone') {
+      const zoneId = newId('DEMO-ZONE');
+      const center = { lng: 103.93, lat: 1.322 };
+      const area = [
+        { lng: 103.919, lat: 1.316 },
+        { lng: 103.944, lat: 1.317 },
+        { lng: 103.946, lat: 1.329 },
+        { lng: 103.922, lat: 1.331 },
+      ];
+      setZones((prev) => [
+        {
+          id: zoneId,
+          title: 'DEMO · Flash flood operating zone',
+          kind: 'flood',
+          severity: 4 as SeverityLevel,
+          status: 'declared',
+          description: 'Demo zone for ops declaration, map polygon, alerts, and responder bulletin workflows.',
+          center,
+          area,
+          declaredBy: 'demo-god-mode',
+          createdAt: now,
+        },
+        ...prev,
+      ]);
+      setEvents((prev) => [
+        {
+          id: newId('DEMO-EV'),
+          kind: 'flood',
+          title: 'DEMO · Flash flood at Bedok South',
+          severity: 4 as SeverityLevel,
+          status: 'verified',
+          location: center,
+          area,
+          source: 'DEMO injection · God Mode',
+          createdAt: now,
+          liveValue: 'demo rainfall surge',
+        },
+        ...prev,
+      ]);
+      setDrawerContent('zones');
+      return;
+    }
+
+    if (scenario === 'traffic_case') {
+      const eventId = newId('DEMO-EV');
+      const caseId = newId('DEMO-CASE');
+      const location = { lng: 103.79, lat: 1.28 };
+      setEvents((prev) => [
+        {
+          id: eventId,
+          kind: 'crash',
+          title: 'DEMO · AYE multi-vehicle collision',
+          severity: 4 as SeverityLevel,
+          status: 'verified',
+          location,
+          source: 'DEMO injection · God Mode',
+          createdAt: now,
+          caseId,
+        },
+        ...prev,
+      ]);
+      setCases((prev) => [
+        {
+          id: caseId,
+          name: caseId.replace('DEMO-CASE-', 'DEMO-'),
+          severity: 4 as SeverityLevel,
+          centroid: location,
+          members: ['R-BRAVO-9', 'R-ECHO-1'],
+          captain: 'R-BRAVO-9',
+          state: 'active',
+          startedAt: now,
+        },
+        ...prev,
+      ]);
+      setResponders((prev) =>
+        prev.map((r) =>
+          r.id === 'R-ECHO-1' ? { ...r, status: 'en_route', location: { lng: 103.83, lat: 1.305 } } : r
+        )
+      );
+      setChat((prev) => [
+        ...prev,
+        {
+          id: newId('DEMO-CH'),
+          caseId,
+          authorId: 'system',
+          kind: 'system',
+          text: 'DEMO case injected: crash event, active room, Echo-1 assignment, and Host command surface ready.',
+          ts: now,
+        },
+      ]);
+      setActiveCaseId(caseId);
+      setDrawerContent('case_lobby');
+      return;
+    }
+
+    const eventId = newId('DEMO-VOL');
+    setVolunteerEvents((prev) => [
+      {
+        id: eventId,
+        title: 'DEMO · AED responder mobilisation drive',
+        category: 'first_aid_training',
+        description: 'Demo community workflow for event creation, responder signup, and skills matching.',
+        location: { lng: 103.85, lat: 1.3 },
+        venue: 'City Hall community room',
+        organizer: 'God Mode demo',
+        date: new Date(now + 86_400_000).toISOString().slice(0, 10),
+        status: 'upcoming',
+        skillsNeeded: ['AED', 'CPR', 'First Aid'],
+        registeredResponderIds: [],
+        createdAt: now,
+      },
+      ...prev,
+    ]);
+    setDrawerContent('volunteer_events');
+  };
+
   // Simulated responder movement
   useEffect(() => {
     const t = setInterval(() => {
@@ -981,8 +1173,11 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   );
 
   const value: AppState = {
+    isAuthenticated,
     role,
     setRole,
+    demoLogin,
+    demoLogout,
     drawerContent,
     setDrawerContent,
     shellState,
@@ -1005,6 +1200,8 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     setActiveCaseId,
     tracking,
     setTracking,
+    selectedMapItem,
+    setSelectedMapItem,
     briefingInView,
     selfResponderId: SELF_ID,
     fileReport,
@@ -1031,6 +1228,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     leaveGroup,
     joinCase,
     leaveCase,
+    runDemoScenario,
   };
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

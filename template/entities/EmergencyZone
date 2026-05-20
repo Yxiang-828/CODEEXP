@@ -1,0 +1,69 @@
+{
+  "name": "EmergencyZone",
+  "type": "object",
+  "properties": {
+    "title": {
+      "type": "string",
+      "description": "Zone/event title"
+    },
+    "category": {
+      "type": "string",
+      "enum": [
+        "health",
+        "fire",
+        "flood",
+        "accident",
+        "hazard"
+      ],
+      "description": "Category type"
+    },
+    "severity": {
+      "type": "string",
+      "enum": [
+        "low",
+        "medium",
+        "high",
+        "critical"
+      ],
+      "default": "medium"
+    },
+    "description": {
+      "type": "string"
+    },
+    "polygon_coords": {
+      "type": "array",
+      "items": {
+        "type": "array",
+        "items": {
+          "type": "number"
+        }
+      },
+      "description": "Array of [lat, lng] pairs forming the polygon"
+    },
+    "center_lat": {
+      "type": "number"
+    },
+    "center_lng": {
+      "type": "number"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "draft",
+        "pending_review",
+        "declared",
+        "archived"
+      ],
+      "default": "draft"
+    },
+    "declared_by": {
+      "type": "string",
+      "description": "Operator who declared the zone"
+    }
+  },
+  "required": [
+    "title",
+    "category",
+    "severity"
+  ]
+}
