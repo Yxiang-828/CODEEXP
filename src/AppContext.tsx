@@ -1,5 +1,9 @@
-// Shared truth store. All coords are real Singapore lng/lat.
-// Live data is merged in from data.gov.sg public APIs (no keys).
+// CSOT provider. Domain types, seed data, and selectors live under ./state/*.
+// See ./state/relations.ts for the cluster relation tree (intake → incidents →
+// operations, with network/intel/presentation orbiting).
+//
+// This file holds only the React provider, action reducers, and side effects
+// (NEA polling, WS bridge, responder movement, reverse geocode).
 
 import {
   createContext,
@@ -11,222 +15,72 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import type { SeverityLevel } from './components/primitives/SeverityChip';
 import { fetchLiveSnapshot, type LiveSnapshot } from './services/live';
 import { askHostAi } from './services/hostAi';
 import { api, connectWs } from './services/backendClient';
+import { getDistanceKm, etaMinutes } from './utils/geo';
+import { reverseGeocode } from './services/revgeocode';
+import {
+  seedActionLogs,
+  seedCases,
+  seedChat,
+  seedEvents,
+  seedGroups,
+  seedNotifications,
+  seedReports,
+  seedResponders,
+  seedSos,
+  seedSources,
+  seedUsers,
+  seedVolunteerEvents,
+  seedZones,
+  SELF_ID,
+} from './state/seed';
+import { etaFromDistanceKm, selectBriefingCounts } from './state/selectors';
+import type {
+  ActionLog,
+  AppUser,
+  CanonicalEvent,
+  CaseRoom,
+  ChatEntry,
+  CitizenReport,
+  DistressSession,
+  EmergencyZone,
+  Group,
+  LngLat,
+  NotificationNotice,
+  Responder,
+  Role,
+  SelectedMapItem,
+  SeverityLevel,
+  ShellState,
+  SourceHealth,
+  TrackingState,
+  VolunteerEvent,
+} from './state/types';
 
-export type Role = 'citizen' | 'responder' | 'ops';
-export type ShellState = 'S0' | 'S2' | 'S4' | 'S6' | 'S9';
-
-export interface LngLat {
-  lng: number;
-  lat: number;
-}
-
-export interface CanonicalEvent {
-  id: string;
-  kind: 'fire' | 'flood' | 'medical' | 'crash' | 'hazard' | 'weather' | 'other';
-  title: string;
-  severity: SeverityLevel;
-  status: 'provisional' | 'verified' | 'resolved';
-  location: LngLat;
-  area?: LngLat[];
-  source: string;
-  createdAt: number;
-  caseId?: string;
-  liveValue?: string;
-}
-
-export interface CitizenReport {
-  id: string;
-  kind: CanonicalEvent['kind'];
-  title: string;
-  body: string;
-  location: LngLat;
-  reporterTrust: number;
-  status: 'pending' | 'claimed' | 'verified' | 'dismissed';
-  claimedBy?: string;
-  createdAt: number;
-  promotedToEventId?: string;
-  notifiedReporter?: boolean;
-  auditTrail?: string[];
-}
-
-export interface DistressSession {
-  id: string;
-  citizenName: string;
-  category: 'medical' | 'fire' | 'trapped' | 'threat' | 'hazard' | 'other';
-  location: LngLat;
-  status:
-    | 'requesting'
-    | 'ack'
-    | 'en_route'
-    | 'arrived'
-    | 'resolving'
-    | 'resolved'
-    | 'cancelled';
-  assignedResponderId?: string;
-  startedAt: number;
-  citizenConfirmedSafe?: boolean;
-  responderConfirmedSafe?: boolean;
-  finalReport?: string;
-}
-
-export interface Responder {
-  id: string;
-  name: string;
-  org: 'SCDF' | 'Volunteer' | 'SPF' | 'SAF' | 'Medic' | 'NEA' | 'LTA';
-  role: 'medic' | 'fire' | 'search' | 'aux';
-  status: 'ready' | 'en_route' | 'on_scene' | 'out' | 'offline';
-  location: LngLat;
-  assignedSosId?: string;
-  groups: string[]; // group ids
-  unitType?: 'volunteer' | 'professional';
-  demo?: boolean;
-  covert?: boolean;
-  note?: string;
-}
-
-export interface AppUser {
-  id: string;
-  username: string;
-  displayName: string;
-  phone: string;
-  primaryRole: Role;
-  secondaryRole?: Role;
-  address: string;
-  skills: string[];
-  available: boolean;
-}
-
-export interface EmergencyZone {
-  id: string;
-  title: string;
-  kind: 'health' | 'fire' | 'flood' | 'accident' | 'hazard';
-  severity: SeverityLevel;
-  status: 'draft' | 'pending_review' | 'declared' | 'archived';
-  description: string;
-  center: LngLat;
-  area: LngLat[];
-  declaredBy: string;
-  createdAt: number;
-}
-
-export interface VolunteerEvent {
-  id: string;
-  title: string;
-  category:
-    | 'community_cleanup'
-    | 'first_aid_training'
-    | 'disaster_drill'
-    | 'food_distribution'
-    | 'elderly_care'
-    | 'youth_mentoring'
-    | 'environmental'
-    | 'other';
-  description: string;
-  location: LngLat;
-  venue: string;
-  organizer: string;
-  organizerRole?: Role | 'ops' | 'community';
-  date: string;
-  status: 'upcoming' | 'ongoing' | 'completed' | 'cancelled';
-  skillsNeeded: string[];
-  registeredResponderIds: string[];
-  createdAt: number;
-}
-
-export interface CaseRoom {
-  id: string;
-  name: string;
-  severity: SeverityLevel;
-  centroid: LngLat;
-  members: string[];
-  captain: string;
-  state: 'forming' | 'staging' | 'active' | 'consolidating' | 'resolved';
-  startedAt: number;
-  source?: 'ops' | 'sos' | 'professional';
-  restricted?: boolean;
-  closure?: {
-    responderAck?: boolean;
-    citizenAck?: boolean;
-    opsClosed?: boolean;
-    finalReport?: string;
-  };
-}
-
-export interface ChatEntry {
-  id: string;
-  caseId: string;
-  authorId: string;
-  kind: 'message' | 'system' | 'host' | 'voice';
-  text: string;
-  chips?: { label: string; ref: string }[];
-  ts: number;
-}
-
-export interface SourceHealth {
-  id: string;
-  name: string;
-  state: 'fresh' | 'stale' | 'down' | 'shell_only' | 'not_configured' | 'unavailable';
-  lastAgeS: number;
-  note?: string;
-}
-
-export type NotificationTier = 'info' | 'watch' | 'urgent' | 'critical';
-
-export interface NotificationNotice {
-  id: string;
-  tier: NotificationTier;
-  roles: Role[];
-  title: string;
-  body: string;
-  targetId?: string;
-  createdAt: number;
-  ackBy: string[];
-}
-
-export interface ActionLog {
-  id: string;
-  actorId: string;
-  actorRole: Role | 'system';
-  action: string;
-  targetId: string;
-  message: string;
-  severity?: SeverityLevel;
-  createdAt: number;
-  visibleTo: Role[];
-}
-
-export interface Group {
-  id: string;
-  name: string;
-  org: string;
-  kind: 'org' | 'capability' | 'geo' | 'community';
-  members: string[];
-  description: string;
-}
-
-export interface TrackingState {
-  kind: string;
-  title: string;
-  eta: string;
-  progress?: number;
-  tone?: 'critical' | 'warning' | 'neutral';
-  drawerId?: string;
-}
-
-export interface SelectedMapItem {
-  id: string;
-  category: string;
-  title: string;
-  detail: string;
-  source: string;
-  lng: number;
-  lat: number;
-  tone?: string;
-}
+export type {
+  ActionLog,
+  AppUser,
+  CanonicalEvent,
+  CaseRoom,
+  ChatEntry,
+  CitizenReport,
+  DistressSession,
+  EmergencyZone,
+  Group,
+  LngLat,
+  NotificationNotice,
+  NotificationTier,
+  Responder,
+  Role,
+  SelectedMapItem,
+  SeverityLevel,
+  ShellState,
+  SourceHealth,
+  TrackingState,
+  VolunteerEvent,
+} from './state/types';
 
 interface AppState {
   isAuthenticated: boolean;
@@ -305,72 +159,22 @@ interface AppState {
 
   selfLocation: LngLat | null;
   setSelfLocation: (loc: LngLat | null) => void;
+  selfPlaceName: string | null;
   liveTracking: boolean;
   setLiveTracking: (on: boolean) => void;
   updateResponderLocation: (responderId: string, loc: LngLat) => void;
   draftPolygon: LngLat[];
   setDraftPolygon: (pts: LngLat[]) => void;
+
+  // God Mode hooks — demo-only mutators. Real flows must go through the
+  // role-appropriate actions above; these exist to drive demos without
+  // re-creating the full user journey each time.
+  godSetSourceState: (sourceId: string, state: SourceHealth['state']) => void;
+  godSeedScenario: (kind: 'minor' | 'major') => void;
+  godResetCsot: () => void;
 }
 
 const AppContext = createContext<AppState | undefined>(undefined);
-
-const SELF_ID = 'R-ECHO-1';
-
-const seed = {
-  groups: [
-    { id: 'G-SCDF-EAST', name: 'SCDF · East District', org: 'SCDF', kind: 'org', members: [], description: 'Singapore Civil Defence Force, Eastern operational district.' },
-    { id: 'G-MEDIC-VOL', name: 'Medic Volunteers', org: 'Volunteer', kind: 'capability', members: [], description: 'Trained first-aid volunteer cadre, island-wide.' },
-    { id: 'G-AED-RESP', name: 'AED Responders', org: 'Volunteer', kind: 'capability', members: [], description: 'Citizens trained on AEDs. SCDF myResponder programme.' },
-    { id: 'G-FIRE-VOL', name: 'Fire Auxiliary', org: 'Volunteer', kind: 'capability', members: [], description: 'Auxiliary fire-trained responders for SCDF augmentation.' },
-  ] as Group[],
-
-  events: [] as CanonicalEvent[],
-  reports: [] as CitizenReport[],
-  sosSessions: [] as DistressSession[],
-
-  responders: [
-    {
-      id: SELF_ID,
-      name: 'Echo-1',
-      org: 'Volunteer',
-      role: 'medic',
-      status: 'ready',
-      location: { lng: 103.85, lat: 1.3 },
-      groups: [],
-      unitType: 'volunteer',
-    },
-  ] as Responder[],
-
-  users: [
-    { id: 'U-CIV-1', username: 'citizen', displayName: 'Citizen', phone: '', primaryRole: 'citizen', address: '', skills: [], available: true },
-    { id: SELF_ID, username: 'echo1', displayName: 'Echo-1', phone: '', primaryRole: 'responder', secondaryRole: 'citizen', address: '', skills: ['First Aid', 'CPR', 'AED'], available: true },
-    { id: 'U-OPS-1', username: 'ops', displayName: 'Ops', phone: '', primaryRole: 'ops', secondaryRole: 'citizen', address: '', skills: ['Dispatch', 'Incident command'], available: true },
-  ] as AppUser[],
-
-  zones: [] as EmergencyZone[],
-  volunteerEvents: [] as VolunteerEvent[],
-  cases: [] as CaseRoom[],
-  chat: [] as ChatEntry[],
-
-  sources: [
-    { id: 'src-1', name: 'NEA PSI', state: 'not_configured', lastAgeS: 0 },
-    { id: 'src-2', name: 'NEA rainfall', state: 'not_configured', lastAgeS: 0 },
-    { id: 'src-3', name: 'NEA 2hr forecast', state: 'not_configured', lastAgeS: 0 },
-    { id: 'src-4', name: 'SCDF dispatch', state: 'not_configured', lastAgeS: 0 },
-    { id: 'src-5', name: 'MOH alerts', state: 'not_configured', lastAgeS: 0 },
-    { id: 'src-6', name: 'OneMap traffic', state: 'not_configured', lastAgeS: 0 },
-    { id: 'src-7', name: 'Reports intake', state: 'not_configured', lastAgeS: 0 },
-    { id: 'src-8', name: 'Kampung Kaki backend', state: 'not_configured', lastAgeS: 0, note: 'FastAPI backend not yet connected.' },
-    { id: 'src-9', name: 'MQTT bridge', state: 'not_configured', lastAgeS: 0, note: 'Mosquitto bridge not connected.' },
-    { id: 'src-10', name: 'OpenRouter Host AI', state: 'not_configured', lastAgeS: 0, note: '/api/host/ask wired. Set OPENROUTER_API_KEY to activate.' },
-    { id: 'src-11', name: 'LTA DataMall', state: 'not_configured', lastAgeS: 0, note: 'Requires DATAMALL_ACCOUNT_KEY.' },
-    { id: 'src-12', name: 'OneMap API services', state: 'not_configured', lastAgeS: 0, note: 'Tiles live. Geocode/routes need ONEMAP_API_KEY.' },
-    { id: 'src-13', name: 'Hospital load', state: 'unavailable', lastAgeS: 0, note: 'No live hospital-load source configured.' },
-  ] as SourceHealth[],
-
-  notifications: [] as NotificationNotice[],
-  actionLogs: [] as ActionLog[],
-};
 
 export const AppProvider = ({ children }: { children: ReactNode }) => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -379,25 +183,47 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   const [shellState, setShellState] = useState<ShellState>('S0');
 
   const [backendOnline, setBackendOnline] = useState(false);
-  const [events, setEvents] = useState<CanonicalEvent[]>(seed.events);
-  const [reports, setReports] = useState<CitizenReport[]>(seed.reports);
-  const [sosSessions, setSosSessions] = useState<DistressSession[]>(seed.sosSessions);
-  const [responders, setResponders] = useState<Responder[]>(seed.responders);
-  const [users, setUsers] = useState<AppUser[]>(seed.users);
-  const [zones, setZones] = useState<EmergencyZone[]>(seed.zones);
-  const [volunteerEvents, setVolunteerEvents] = useState<VolunteerEvent[]>(seed.volunteerEvents);
-  const [cases, setCases] = useState<CaseRoom[]>(seed.cases);
-  const [chat, setChat] = useState<ChatEntry[]>(seed.chat);
-  const [sources] = useState<SourceHealth[]>(seed.sources);
-  const [groups, setGroups] = useState<Group[]>(seed.groups);
+  const [events, setEvents] = useState<CanonicalEvent[]>(seedEvents);
+  const [reports, setReports] = useState<CitizenReport[]>(seedReports);
+  const [sosSessions, setSosSessions] = useState<DistressSession[]>(seedSos);
+  const [responders, setResponders] = useState<Responder[]>(seedResponders);
+  const [users, setUsers] = useState<AppUser[]>(seedUsers);
+  const [zones, setZones] = useState<EmergencyZone[]>(seedZones);
+  const [volunteerEvents, setVolunteerEvents] = useState<VolunteerEvent[]>(seedVolunteerEvents);
+  const [cases, setCases] = useState<CaseRoom[]>(seedCases);
+  const [chat, setChat] = useState<ChatEntry[]>(seedChat);
+  const [sources, setSources] = useState<SourceHealth[]>(seedSources);
+  const [groups, setGroups] = useState<Group[]>(seedGroups);
   const [liveSnapshot, setLiveSnapshot] = useState<LiveSnapshot | null>(null);
-  const [notifications, setNotifications] = useState<NotificationNotice[]>(seed.notifications);
-  const [actionLogs, setActionLogs] = useState<ActionLog[]>(seed.actionLogs);
+  const [notifications, setNotifications] = useState<NotificationNotice[]>(seedNotifications);
+  const [actionLogs, setActionLogs] = useState<ActionLog[]>(seedActionLogs);
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [activeCaseId, setActiveCaseId] = useState<string | null>(null);
   const [tracking, setTracking] = useState<TrackingState | null>(null);
   const [selfLocation, setSelfLocation] = useState<LngLat | null>(null);
+  const [selfPlaceName, setSelfPlaceName] = useState<string | null>(null);
+  const lastGeocodeKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!selfLocation) {
+      setSelfPlaceName(null);
+      lastGeocodeKeyRef.current = null;
+      return;
+    }
+    // Round to 3 decimals (~110m grid) so we don't spam revgeocode on tiny GPS jitter
+    const key = `${selfLocation.lat.toFixed(3)},${selfLocation.lng.toFixed(3)}`;
+    if (key === lastGeocodeKeyRef.current) return;
+    lastGeocodeKeyRef.current = key;
+    let cancelled = false;
+    const handle = setTimeout(() => {
+      reverseGeocode(selfLocation).then((res) => {
+        if (cancelled) return;
+        if (res.state === 'live' && res.placeName) setSelfPlaceName(res.placeName);
+        else setSelfPlaceName(null);
+      });
+    }, 600);
+    return () => { cancelled = true; clearTimeout(handle); };
+  }, [selfLocation]);
   const [liveTracking, setLiveTracking] = useState(false);
   const [draftPolygon, setDraftPolygon] = useState<LngLat[]>([]);
   const [selectedMapItem, setSelectedMapItem] = useState<SelectedMapItem | null>(null);
@@ -785,10 +611,13 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       body: `${responder?.name ?? responderId} is en route. Arrival and resolution require acknowledgements.`,
       targetId: sosId,
     });
+    const distKm = responder && sos ? getDistanceKm(responder.location, sos.location) : null;
     setTracking({
       kind: 'SOS LIVE',
-      title: 'Responder en route · ETA 4 min',
-      eta: '4:00',
+      title: distKm !== null
+        ? `Responder en route · ETA ${etaFromDistanceKm(distKm)}`
+        : 'Responder en route',
+      eta: distKm !== null ? etaFromDistanceKm(distKm) : 'computing',
       progress: 0.35,
       tone: 'critical',
       drawerId: 'sos_live',
@@ -810,8 +639,20 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
         })
       );
     }
+    const responder = sos?.assignedResponderId
+      ? responders.find((r) => r.id === sos.assignedResponderId)
+      : null;
+    const distKm = responder && sos ? getDistanceKm(responder.location, sos.location) : null;
+    const liveEta = distKm !== null ? etaFromDistanceKm(distKm) : 'computing';
     const map: Record<string, TrackingState> = {
-      en_route: { kind: 'SOS LIVE', title: 'Responder en route', eta: '2:30', progress: 0.55, tone: 'critical', drawerId: 'sos_live' },
+      en_route: {
+        kind: 'SOS LIVE',
+        title: `Responder en route · ETA ${liveEta}`,
+        eta: liveEta,
+        progress: 0.55,
+        tone: 'critical',
+        drawerId: 'sos_live',
+      },
       arrived: { kind: 'SOS LIVE', title: 'Responder arrived', eta: 'now', progress: 0.85, tone: 'critical', drawerId: 'sos_live' },
       resolving: { kind: 'SOS LIVE', title: 'Confirming resolution', eta: 'ack needed', progress: 0.92, tone: 'warning', drawerId: 'sos_live' },
       resolved: { kind: 'SOS LIVE', title: 'Resolved', eta: '—', progress: 1, tone: 'neutral', drawerId: 'sos_live' },
@@ -1154,45 +995,149 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     const q = query.toLowerCase();
     const caseRoom = cases.find((c) => c.id === caseId);
     const caseMembers = caseRoom ? responders.filter((r) => caseRoom.members.includes(r.id)) : [];
-    let text = 'Host AI unavailable. Try /host help for commands.';
-    let chips: ChatEntry['chips'] = [{ label: 'tool: host_ai', ref: 'unavailable' }];
-    if (q.includes('status')) {
-      if (caseRoom) {
-        const onScene = caseMembers.filter((r) => r.status === 'on_scene').length;
-        const enRoute = caseMembers.filter((r) => r.status === 'en_route').length;
-        text = `${caseRoom.name} · ${caseRoom.state} · ${caseMembers.length} members · ${onScene} on scene · ${enRoute} en route.`;
-        chips = [{ label: 'tool: case_state', ref: caseRoom.state }, { label: 'tool: roster', ref: `${caseMembers.length}` }];
-      } else {
-        text = 'Case state unavailable.';
-        chips = [{ label: 'tool: case_state', ref: 'unavailable' }];
-      }
-    } else if (q.includes('aed') || q.includes('nearest')) {
-      text = 'Nearest AED: unavailable. OneMap theme layer not yet wired.';
-      chips = [{ label: 'tool: onemap_theme', ref: 'unavailable' }];
-    } else if (q.includes('hospital')) {
-      text = 'Hospital load: unavailable. No live source wired.';
-      chips = [{ label: 'tool: hospital_load', ref: 'unavailable' }];
-    } else if (q.includes('weather') || q.includes('psi')) {
-      const psi = liveSnapshot?.psi[0];
-      text = psi
-        ? `PSI national ${psi.psi24h}. Air quality ${(psi.psi24h ?? 0) < 55 ? 'good' : 'moderate'}. Source: NEA live.`
-        : 'NEA PSI: unavailable. Live fetch not yet complete.';
-      chips = [{ label: 'tool: nea_psi', ref: psi ? 'live' : 'unavailable' }];
-    } else if (q.includes('escalate')) {
-      if (caseRoom) {
-        text = caseRoom.severity >= 4
-          ? `Severity ${caseRoom.severity} active. Review roster and SOS queue before deciding.`
-          : `Severity ${caseRoom.severity}. No automatic escalation threshold reached.`;
-        chips = [{ label: 'tool: case_state', ref: caseRoom.state }];
-      } else {
-        text = 'Escalation assessment unavailable: no active case found.';
-        chips = [{ label: 'tool: case_state', ref: 'unavailable' }];
-      }
-    } else if (q.includes('help')) {
-      text = 'Commands: /host status · /host nearest aed · /host hospital load · /host weather · /host escalate?';
-      chips = [];
+    const caseEvent = events.find((e) => e.caseId === caseId);
+
+    // /host status
+    if (q.includes('status') && !q.includes('formation')) {
+      if (!caseRoom) return { text: 'Case state unavailable.', chips: [{ label: 'tool: case_state', ref: 'unavailable' }] };
+      const onScene = caseMembers.filter((r) => r.status === 'on_scene').length;
+      const enRoute = caseMembers.filter((r) => r.status === 'en_route').length;
+      return {
+        text: `${caseRoom.name} · ${caseRoom.state} · sev ${caseRoom.severity} · ${caseMembers.length} members · ${onScene} on scene · ${enRoute} en route.`,
+        chips: [{ label: 'tool: case_state', ref: caseRoom.state }, { label: 'tool: roster', ref: `${caseMembers.length}` }],
+      };
     }
-    return { text, chips };
+
+    // /host route <m> to <p>
+    if (q.includes('route')) {
+      if (!caseRoom) return { text: 'Route unavailable: no active case.', chips: [{ label: 'tool: route', ref: 'unavailable' }] };
+      const target = caseRoom.centroid;
+      const lines = caseMembers.map((r) => {
+        const km = getDistanceKm(r.location, target);
+        return `${r.name}: ${km.toFixed(2)} km · ETA ${etaMinutes(km)} min to case centroid.`;
+      });
+      return {
+        text: lines.length ? `Routes to ${caseRoom.name}:\n${lines.join('\n')}` : 'No members assigned to route.',
+        chips: [{ label: 'tool: route', ref: 'haversine' }],
+      };
+    }
+
+    // /host nearest aed — honest stub
+    if (q.includes('aed') || (q.includes('nearest') && !q.includes('hospital'))) {
+      return { text: 'Nearest AED: unavailable. OneMap AED theme not yet wired.', chips: [{ label: 'tool: onemap_theme', ref: 'unavailable' }] };
+    }
+
+    // /host hospital load — honest stub
+    if (q.includes('hospital')) {
+      return { text: 'Hospital A&E load: unavailable. No live MOH/hospital source wired.', chips: [{ label: 'tool: hospital_load', ref: 'unavailable' }] };
+    }
+
+    // /host weather
+    if (q.includes('weather') || q.includes('psi')) {
+      const psi = liveSnapshot?.psi[0];
+      return {
+        text: psi ? `PSI national ${psi.psi24h}. Air quality ${(psi.psi24h ?? 0) < 55 ? 'good' : 'moderate'}. Source: NEA live.` : 'NEA PSI: unavailable. Live fetch not configured.',
+        chips: [{ label: 'tool: nea_psi', ref: psi ? 'live' : 'unavailable' }],
+      };
+    }
+
+    // /host check <m>
+    if (q.includes('check')) {
+      const tokens = q.replace('/host', '').replace('check', '').trim().split(/\s+/).filter(Boolean);
+      const found = caseMembers.find((r) => tokens.some((t) => r.name.toLowerCase().includes(t) || r.id.toLowerCase().includes(t)));
+      if (!found) return { text: 'Check: member not found in this case roster.', chips: [{ label: 'tool: roster', ref: 'no_match' }] };
+      return {
+        text: `${found.name} (${found.org}) · ${found.status} · loc ${found.location.lat.toFixed(4)},${found.location.lng.toFixed(4)} · last beat: unavailable (no heartbeat source).`,
+        chips: [{ label: 'tool: roster', ref: found.status }],
+      };
+    }
+
+    // /host suggest formation
+    if (q.includes('formation') || q.includes('suggest')) {
+      if (!caseRoom) return { text: 'Formation suggestion unavailable: no active case.', chips: [{ label: 'tool: formation', ref: 'unavailable' }] };
+      const roleCounts: Record<string, number> = {};
+      caseMembers.forEach((r) => { roleCounts[r.role] = (roleCounts[r.role] ?? 0) + 1; });
+      const roster = Object.entries(roleCounts).map(([k, v]) => `${k}:${v}`).join(' · ') || 'empty';
+      const need: string[] = [];
+      if (caseEvent?.kind === 'fire' && !roleCounts.fire) need.push('fire');
+      if (caseEvent?.kind === 'medical' && !roleCounts.medic) need.push('medic');
+      if (!roleCounts.medic && (caseRoom.severity >= 3)) need.push('medic');
+      return {
+        text: `Roster: ${roster}. ${need.length ? `Suggest add: ${need.join(', ')}.` : 'Composition acceptable for current case kind.'}`,
+        chips: [{ label: 'tool: formation', ref: need.length ? 'gap' : 'ok' }],
+      };
+    }
+
+    // /host new pings?
+    if (q.includes('ping') || q.includes('new')) {
+      const open = sosSessions.filter((s) => !['resolved', 'cancelled'].includes(s.status) && !s.assignedResponderId);
+      if (!caseRoom || open.length === 0) {
+        return { text: open.length === 0 ? 'No unassigned SOS pings.' : 'No active case to compare against.', chips: [{ label: 'tool: sos_queue', ref: `${open.length}` }] };
+      }
+      const sorted = open
+        .map((s) => ({ s, km: getDistanceKm(s.location, caseRoom.centroid) }))
+        .sort((a, b) => a.km - b.km)
+        .slice(0, 3);
+      const lines = sorted.map(({ s, km }) => `${s.id} · ${s.category} · ${km.toFixed(1)} km from case`);
+      return { text: `Open pings near ${caseRoom.name}:\n${lines.join('\n')}`, chips: [{ label: 'tool: sos_queue', ref: `${open.length}` }] };
+    }
+
+    // /host playback 5m
+    if (q.includes('playback')) {
+      const cutoff = Date.now() - 5 * 60_000;
+      const recent = chat.filter((c) => c.caseId === caseId && c.ts >= cutoff);
+      if (recent.length === 0) return { text: 'No chat activity in last 5 min.', chips: [{ label: 'tool: chat_log', ref: '0' }] };
+      const lines = recent.slice(-6).map((c) => {
+        const author = c.authorId === 'host' ? 'Host' : c.authorId === 'ops' ? 'Ops' : (responders.find((r) => r.id === c.authorId)?.name ?? c.authorId);
+        return `${author}: ${c.text.slice(0, 80)}`;
+      });
+      return { text: `Last 5 min (${recent.length} entries):\n${lines.join('\n')}`, chips: [{ label: 'tool: chat_log', ref: `${recent.length}` }] };
+    }
+
+    // /host escalate?
+    if (q.includes('escalate')) {
+      if (!caseRoom) return { text: 'Escalation assessment unavailable: no active case found.', chips: [{ label: 'tool: case_state', ref: 'unavailable' }] };
+      const openSos = sosSessions.filter((s) => !['resolved', 'cancelled'].includes(s.status)).length;
+      const decision = caseRoom.severity >= 4 || openSos >= 3 ? 'YES' : 'NO';
+      const why = caseRoom.severity >= 4 ? `severity ${caseRoom.severity} ≥ 4` : openSos >= 3 ? `${openSos} open SOS pings` : `severity ${caseRoom.severity} below threshold; ${openSos} open pings`;
+      return { text: `${decision}. Rationale: ${why}.`, chips: [{ label: 'tool: case_state', ref: caseRoom.state }] };
+    }
+
+    // /host pause watchdog 10m — captain-only acknowledgement; no real watchdog wired
+    if (q.includes('pause') || q.includes('watchdog')) {
+      const isCaptain = caseRoom?.captain === SELF_ID;
+      if (!isCaptain) return { text: 'Pause watchdog: captain-only command.', chips: [{ label: 'tool: watchdog', ref: 'denied' }] };
+      const until = new Date(Date.now() + 10 * 60_000).toLocaleTimeString();
+      return { text: `Watchdog mute acknowledged until ${until}. (Local-only; no proactive watchdog yet wired.)`, chips: [{ label: 'tool: watchdog', ref: 'muted_local' }] };
+    }
+
+    // /host draft aar
+    if (q.includes('aar')) {
+      if (!caseRoom) return { text: 'AAR draft unavailable: no case selected.', chips: [{ label: 'tool: aar', ref: 'unavailable' }] };
+      const durationMin = Math.round((Date.now() - caseRoom.startedAt) / 60_000);
+      const chatCount = chat.filter((c) => c.caseId === caseId).length;
+      return {
+        text: [
+          `AAR draft · ${caseRoom.name}`,
+          `Event: ${caseEvent?.title ?? 'unspecified'} (${caseEvent?.kind ?? 'n/a'})`,
+          `Severity: ${caseRoom.severity} · State: ${caseRoom.state} · Duration: ${durationMin} min`,
+          `Members (${caseMembers.length}): ${caseMembers.map((r) => r.name).join(', ') || 'none'}`,
+          `Chat entries: ${chatCount}. Captain: ${responders.find((r) => r.id === caseRoom.captain)?.name ?? 'unassigned'}.`,
+          `Outcomes / lessons: pending captain input.`,
+        ].join('\n'),
+        chips: [{ label: 'tool: aar', ref: 'draft' }],
+      };
+    }
+
+    // /host help
+    if (q.includes('help')) {
+      return {
+        text: 'Commands: /host status · /host route · /host nearest aed · /host hospital load · /host weather · /host check <member> · /host suggest formation · /host new pings? · /host playback 5m · /host escalate? · /host pause watchdog 10m · /host draft aar · /host help',
+        chips: [],
+      };
+    }
+
+    return { text: 'Host AI unavailable. Try /host help for commands.', chips: [{ label: 'tool: host_ai', ref: 'unavailable' }] };
   };
 
   const askHost: AppState['askHost'] = (caseId, query) => {
@@ -1200,6 +1145,14 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     const caseRoom = cases.find((c) => c.id === caseId);
     const caseEvent = events.find((e) => e.caseId === caseId);
     const caseMembers = responders.filter((r) => caseRoom?.members.includes(r.id));
+    const recentCutoff = Date.now() - 5 * 60_000;
+    const recentChat = chat
+      .filter((c) => c.caseId === caseId && c.ts >= recentCutoff)
+      .slice(-8)
+      .map((c) => ({ author: c.authorId, kind: c.kind, text: c.text.slice(0, 140), ts: c.ts }));
+    const openSos = sosSessions
+      .filter((s) => !['resolved', 'cancelled'].includes(s.status) && !s.assignedResponderId)
+      .map((s) => ({ id: s.id, category: s.category, status: s.status, location: s.location }));
     askHostAi({
       role,
       workspace: 'case_lobby',
@@ -1207,8 +1160,11 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       context: {
         case: caseRoom,
         event: caseEvent,
-        responders: caseMembers.map((r) => ({ id: r.id, name: r.name, status: r.status, role: r.role })),
+        responders: caseMembers.map((r) => ({ id: r.id, name: r.name, status: r.status, role: r.role, location: r.location, org: r.org })),
+        sos: openSos,
+        chatRecent: recentChat,
         liveSnapshot: liveSnapshot ? { psi: liveSnapshot.psi?.[0] ?? null } : null,
+        selfResponderId: SELF_ID,
       },
     })
       .then((reply) => {
@@ -1416,17 +1372,136 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   }, [sosSessions]);
 
   const briefingInView = useMemo(
-    () => {
-      const verifiedEvents = events.filter((e) => e.status === 'verified').length;
-      const activeSos = sosSessions.filter((s) => !['resolved', 'cancelled'].includes(s.status)).length;
-      if (role === 'ops') {
-        return verifiedEvents + activeSos + reports.filter((r) => r.status === 'pending' || r.status === 'claimed').length;
-      }
-      if (role === 'responder') return verifiedEvents + activeSos + cases.filter((c) => c.state !== 'resolved').length;
-      return verifiedEvents + notifications.filter((n) => n.roles.includes('citizen')).length;
-    },
-    [events, reports, sosSessions, cases, notifications, role]
+    () =>
+      selectBriefingCounts({ events, sosSessions, reports, cases, notifications, role }).total,
+    [events, reports, sosSessions, cases, notifications, role],
   );
+
+  // ──────────────────────────────────────────────────────────────────
+  // God Mode — demo helpers. Each call still goes through the same
+  // pushLog/pushNotification pipeline so the action log stays honest.
+  // ──────────────────────────────────────────────────────────────────
+  const godSetSourceState: AppState['godSetSourceState'] = (sourceId, state) => {
+    setSources((prev) => prev.map((s) => (s.id === sourceId ? { ...s, state } : s)));
+    pushLog({
+      actorId: 'godmode',
+      actorRole: 'system',
+      action: 'godmode.source_state',
+      targetId: sourceId,
+      message: `Source ${sourceId} state set to ${state} via God Mode.`,
+      visibleTo: ['ops'],
+    });
+  };
+
+  const seedSamplePoints = [
+    { name: 'Bedok Central', lng: 103.9298, lat: 1.324 },
+    { name: 'Jurong East MRT', lng: 103.7423, lat: 1.3331 },
+    { name: 'Tampines hub', lng: 103.9447, lat: 1.3528 },
+    { name: 'AYE merge', lng: 103.79, lat: 1.28 },
+  ];
+
+  const godSeedScenario: AppState['godSeedScenario'] = (kind) => {
+    const pick = (i: number) => seedSamplePoints[i % seedSamplePoints.length];
+    const minor = () => {
+      const a = pick(0);
+      const b = pick(1);
+      const repId = newId('REP');
+      setReports((prev) => [
+        {
+          id: repId,
+          kind: 'hazard',
+          title: 'Loose debris on covered walkway',
+          body: `Demo seed · ${a.name}. Citizen reports tile fragments at pedestrian level.`,
+          location: { lng: a.lng, lat: a.lat },
+          reporterTrust: 0.6,
+          status: 'pending',
+          createdAt: Date.now(),
+          auditTrail: ['Seeded by God Mode for demo. Awaiting ops triage.'],
+        },
+        ...prev,
+      ]);
+      const evId = newId('EV');
+      setEvents((prev) => [
+        {
+          id: evId,
+          kind: 'crash',
+          title: 'Two-vehicle bump · slow lane',
+          severity: 2,
+          status: 'verified',
+          location: { lng: b.lng, lat: b.lat },
+          source: 'God Mode demo seed',
+          createdAt: Date.now(),
+        },
+        ...prev,
+      ]);
+    };
+    const major = () => {
+      minor();
+      const c = pick(2);
+      const d = pick(3);
+      const sosId = newId('SOS');
+      setSosSessions((prev) => [
+        {
+          id: sosId,
+          citizenName: 'Demo Citizen',
+          category: 'medical',
+          location: { lng: c.lng, lat: c.lat },
+          status: 'requesting',
+          startedAt: Date.now(),
+        },
+        ...prev,
+      ]);
+      const evId = newId('EV');
+      setEvents((prev) => [
+        {
+          id: evId,
+          kind: 'fire',
+          title: 'Demo · Industrial fire (4-storey shophouse)',
+          severity: 4,
+          status: 'verified',
+          location: { lng: d.lng, lat: d.lat },
+          source: 'God Mode demo seed',
+          createdAt: Date.now(),
+        },
+        ...prev,
+      ]);
+      pushNotification({
+        tier: 'critical',
+        roles: ['ops', 'responder'],
+        title: 'Demo · Major scenario seeded',
+        body: 'God Mode seeded a fire + medical SOS for presentation.',
+      });
+    };
+    if (kind === 'major') major();
+    else minor();
+    pushLog({
+      actorId: 'godmode',
+      actorRole: 'system',
+      action: `godmode.seed.${kind}`,
+      targetId: 'csot',
+      message: `Demo scenario "${kind}" seeded via God Mode.`,
+      visibleTo: ['ops', 'responder', 'citizen'],
+    });
+  };
+
+  const godResetCsot: AppState['godResetCsot'] = () => {
+    setReports([]);
+    setSosSessions([]);
+    setEvents([]);
+    setCases([]);
+    setChat([]);
+    setZones([]);
+    setVolunteerEvents([]);
+    setNotifications([]);
+    setActionLogs([]);
+    setSources(seedSources);
+    setResponders(seedResponders);
+    setTracking(null);
+    setDraftPolygon([]);
+    setSelectedId(null);
+    setSelectedMapItem(null);
+    setActiveCaseId(null);
+  };
 
   const value: AppState = {
     isAuthenticated,
@@ -1499,12 +1574,33 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     ackNotification,
     selfLocation,
     setSelfLocation,
+    selfPlaceName,
     liveTracking,
     setLiveTracking,
     updateResponderLocation,
     draftPolygon,
     setDraftPolygon,
+    godSetSourceState,
+    godSeedScenario,
+    godResetCsot,
   };
+
+  // Debug hook for Playwright / demo scripting. Available in dev + preview;
+  // not a security surface — only safe demo mutators are exposed.
+  if (typeof window !== 'undefined') {
+    (window as unknown as { __kk?: unknown }).__kk = {
+      role,
+      setRole,
+      demoLogin,
+      demoLogout,
+      setDrawerContent,
+      setSelectedId,
+      setActiveCaseId,
+      godSeedScenario,
+      godResetCsot,
+      godSetSourceState,
+    };
+  }
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 };

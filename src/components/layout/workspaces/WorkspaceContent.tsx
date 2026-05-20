@@ -21,6 +21,7 @@ import {
   ProfileWorkspace,
   VolunteerEvents,
   JoinableMissions,
+  ResponderAssistant,
 } from './ResponderWorkspaces';
 import {
   DeclareIncident,
@@ -36,6 +37,7 @@ import {
   ReadinessReport,
   ActivityLogWorkspace,
   NotificationCenter,
+  OpsAssistant,
 } from './OpsWorkspaces';
 import { MapLayersWorkspace } from './DemoWorkspaces';
 
@@ -58,6 +60,7 @@ const REGISTRY: Record<string, () => React.JSX.Element> = {
   profile: ProfileWorkspace,
   volunteer_events: VolunteerEvents,
   joinable_missions: JoinableMissions,
+  responder_ai: ResponderAssistant,
   declare: DeclareIncident,
   incident_ops: IncidentOps,
   dispatch: DispatchResponder,
@@ -71,6 +74,7 @@ const REGISTRY: Record<string, () => React.JSX.Element> = {
   readiness: ReadinessReport,
   activity_log: ActivityLogWorkspace,
   notifications: NotificationCenter,
+  ops_ai: OpsAssistant,
   map_layers: MapLayersWorkspace,
   map_item: MapLayersWorkspace,
 };

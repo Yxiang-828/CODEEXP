@@ -19,6 +19,7 @@ import {
   ChevronUp,
 } from 'lucide-react';
 import { useState } from 'react';
+import { Sparkles } from 'lucide-react';
 import type React from 'react';
 import { useAppContext } from '../../../AppContext';
 import type { CanonicalEvent, DistressSession, VolunteerEvent, Responder } from '../../../AppContext';
@@ -26,6 +27,8 @@ import SeverityChip from '../../primitives/SeverityChip';
 import StatusPipeline from '../../primitives/StatusPipeline';
 import SlashComposer from '../../primitives/SlashComposer';
 import { etaMinutes, filterWithinKm, getDistanceKm } from '../../../utils/geo';
+import { askHostAi, type HostAiResponse } from '../../../services/hostAi';
+import { fitForCase, fitForSos } from '../../../state/selectors';
 
 export function DutyStatus() {
   const { responders, toggleDuty, selfResponderId } = useAppContext();
@@ -137,7 +140,20 @@ export function FormCase() {
 }
 
 export function AssignmentDetail() {
-  const { sosSessions, responders, advanceSos, confirmSosSafe, selfResponderId, cases, events, setActiveCaseId, setDrawerContent, sendChat } = useAppContext();
+  const {
+    sosSessions,
+    responders,
+    advanceSos,
+    confirmSosSafe,
+    selfResponderId,
+    cases,
+    events,
+    setActiveCaseId,
+    setDrawerContent,
+    sendChat,
+    messageCitizen,
+    pushNotification,
+  } = useAppContext();
   const sos = sosSessions.find((s) => s.assignedResponderId === selfResponderId);
   const activeCase = cases.find((c) => c.members.includes(selfResponderId) && c.state !== 'resolved');
   const caseEvent = activeCase ? events.find((e) => e.caseId === activeCase.id) : null;
@@ -238,8 +254,21 @@ export function AssignmentDetail() {
         </button>
         <button
           onClick={() => {
+            // Honest handoff: park SOS in resolving, notify the citizen, and
+            // raise an urgent flag to ops for re-dispatch. No magic case ID.
             advanceSos(sos.id, 'resolving');
-            sendChat('CASE-ALPHA-09', selfResponderId, `Unable / handoff requested for ${sos.id}.`);
+            messageCitizen(
+              sos.id,
+              selfResponderId,
+              'Responder requested a handoff. Ops has been notified to re-dispatch.',
+            );
+            pushNotification({
+              tier: 'urgent',
+              roles: ['ops'],
+              title: `Handoff requested · ${sos.id}`,
+              body: `${me?.name ?? selfResponderId} cannot continue ${sos.id} (${sos.category}). Re-dispatch needed.`,
+              targetId: sos.id,
+            });
           }}
           className="w-full bg-accent-warning text-text-primary py-3 text-[10px] uppercase font-bold tracking-widest border border-border-strong"
         >
@@ -1101,39 +1130,6 @@ function FitMeter({ score, reason }: { score: number; reason: string }) {
   );
 }
 
-function fitForSos(responder: Responder | undefined, category: DistressSession['category'], distanceKm: number) {
-  const skills = responder?.role ?? 'aux';
-  const match =
-    (category === 'medical' && skills === 'medic') ||
-    (category === 'fire' && skills === 'fire') ||
-    (category === 'trapped' && skills === 'search') ||
-    (category === 'hazard' && skills === 'aux');
-  const distanceScore = Math.max(0, 34 - Math.round(distanceKm * 5));
-  const score = Math.min(98, 45 + distanceScore + (match ? 20 : 0) + (responder?.status === 'ready' ? 8 : 0));
-  return {
-    score,
-    reason: `${match ? 'Capability match' : 'Partial capability'} · ${distanceKm.toFixed(1)} km · ${responder?.status ?? 'unknown'}`,
-  };
-}
-
-function fitForCase(
-  responder: Responder | undefined,
-  severity: 1 | 2 | 3 | 4 | 5,
-  event: CanonicalEvent | undefined,
-  distanceKm: number
-) {
-  const match =
-    (event?.kind === 'medical' && responder?.role === 'medic') ||
-    (event?.kind === 'fire' && responder?.role === 'fire') ||
-    (event?.kind === 'crash' && responder?.role !== 'aux') ||
-    (event?.kind === 'flood' && ['search', 'aux'].includes(responder?.role ?? ''));
-  const score = Math.min(96, 38 + (match ? 24 : 8) + Math.max(0, 26 - Math.round(distanceKm * 3)) + severity * 3);
-  return {
-    score,
-    reason: `${match ? 'Role matches incident' : 'Support role'} · severity L${severity} · ${distanceKm.toFixed(1)} km`,
-  };
-}
-
 function Row({
   title,
   tag,
@@ -1318,6 +1314,146 @@ function Card({ children }: { children: React.ReactNode }) {
   return (
     <div className="bg-surface-2 border border-border-strong p-3 text-sm leading-relaxed shadow-[3px_3px_0_rgba(26,26,26,1)]">
       {children}
+    </div>
+  );
+}
+
+export function ResponderAssistant() {
+  const {
+    responders,
+    sosSessions,
+    cases,
+    events,
+    selfResponderId,
+    selfLocation,
+    liveSnapshot,
+    sources,
+  } = useAppContext();
+  const self = responders.find((r) => r.id === selfResponderId);
+  const origin = self?.location ?? selfLocation ?? { lng: 103.8198, lat: 1.3521 };
+  const [prompt, setPrompt] = useState('Which mission near me is best fit right now?');
+  const [reply, setReply] = useState<HostAiResponse | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const joinableSos = sosSessions
+    .filter((s) => s.status === 'requesting')
+    .map((s) => {
+      const distanceKm = getDistanceKm(origin, s.location);
+      const fit = fitForSos(self, s.category, distanceKm);
+      return { id: s.id, category: s.category, distanceKm: Number(distanceKm.toFixed(2)), fit: fit.score };
+    })
+    .sort((a, b) => b.fit - a.fit)
+    .slice(0, 4);
+
+  const joinableCases = cases
+    .filter((c) => !c.members.includes(selfResponderId) && c.state !== 'resolved')
+    .map((c) => {
+      const event = events.find((e) => e.caseId === c.id);
+      const distanceKm = getDistanceKm(origin, c.centroid);
+      const fit = fitForCase(self, c.severity, event, distanceKm);
+      return {
+        id: c.id,
+        name: c.name,
+        severity: c.severity,
+        restricted: !!c.restricted,
+        distanceKm: Number(distanceKm.toFixed(2)),
+        fit: fit.score,
+      };
+    })
+    .sort((a, b) => b.fit - a.fit)
+    .slice(0, 4);
+
+  const ask = async () => {
+    setLoading(true);
+    const result = await askHostAi({
+      role: 'responder',
+      workspace: 'responder_mission',
+      prompt,
+      context: {
+        selfStatus: {
+          id: selfResponderId,
+          name: self?.name ?? selfResponderId,
+          role: self?.role,
+          unitType: self?.unitType,
+          status: self?.status,
+          location: self?.location ?? origin,
+        },
+        joinableSos,
+        joinableCases,
+        liveSnapshot: liveSnapshot ? { psi: liveSnapshot.psi?.[0] ?? null } : null,
+        sources: sources.map((s) => ({ name: s.name, state: s.state })),
+      },
+    }).catch(() => ({
+      state: 'unavailable' as const,
+      text: 'Host AI unavailable. Use the mission board ranked by fit and distance.',
+      chips: [{ label: 'tool: host_ai', ref: 'unavailable' }],
+    }));
+    setReply(result);
+    setLoading(false);
+  };
+
+  return (
+    <div className="p-5 flex flex-col gap-4">
+      <h2 className="text-xl font-serif italic font-black flex items-center gap-2">
+        <Bot className="w-4 h-4" />
+        Mission copilot
+      </h2>
+      <Card>
+        Responder copilot. Ranks joinable SOS and case rooms by fit × distance from your live position. Loads only when you press Ask.
+      </Card>
+      {joinableSos.length === 0 && joinableCases.length === 0 ? (
+        <Card>Nothing joinable in range. Try expanding duty area or wait for ops dispatch.</Card>
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          {joinableSos.slice(0, 2).map((s) => (
+            <div key={s.id} className="border border-border-strong bg-surface-2 p-2 shadow-[2px_2px_0_rgba(26,26,26,1)]">
+              <div className="text-[10px] font-black uppercase tracking-widest">{s.id} · {s.category}</div>
+              <div className="text-[9px] uppercase tracking-widest text-text-secondary mt-1">
+                fit {s.fit}% · {s.distanceKm} km
+              </div>
+            </div>
+          ))}
+          {joinableCases.slice(0, 2).map((c) => (
+            <div key={c.id} className="border border-border-strong bg-surface-2 p-2 shadow-[2px_2px_0_rgba(26,26,26,1)]">
+              <div className="text-[10px] font-black uppercase tracking-widest">#{c.name} · L{c.severity}</div>
+              <div className="text-[9px] uppercase tracking-widest text-text-secondary mt-1">
+                {c.restricted ? 'monitor only · ' : ''}fit {c.fit}% · {c.distanceKm} km
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      <textarea
+        value={prompt}
+        onChange={(e) => setPrompt(e.target.value)}
+        className="w-full h-24 p-3 border border-border-strong bg-surface-0 text-sm font-mono resize-none outline-none focus:border-text-primary"
+      />
+      <button
+        onClick={ask}
+        disabled={loading}
+        className="w-full bg-surface-3 text-text-inverse py-3 text-[10px] uppercase font-bold tracking-widest border border-border-strong shadow-[3px_3px_0_rgba(26,26,26,1)] flex items-center justify-center gap-2 disabled:opacity-60"
+      >
+        <Sparkles className="w-3 h-3" />
+        {loading ? 'Asking Host AI' : 'Ask copilot'}
+      </button>
+      {reply && (
+        <Card>
+          <strong className="block uppercase tracking-widest text-[9px] mb-1">Host AI · {reply.state}</strong>
+          <span className="whitespace-pre-line">{reply.text}</span>
+          {reply.chips && reply.chips.length > 0 && (
+            <div className="flex flex-wrap gap-1 mt-2">
+              {reply.chips.map((c) => (
+                <span
+                  key={c.label}
+                  className="px-1.5 py-0.5 border border-border-strong text-[8px] font-mono uppercase tracking-widest bg-surface-0"
+                >
+                  {c.label} · {c.ref}
+                </span>
+              ))}
+            </div>
+          )}
+        </Card>
+      )}
     </div>
   );
 }
