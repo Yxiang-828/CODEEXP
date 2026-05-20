@@ -36,7 +36,7 @@ const ONEMAP_GREY = 'https://www.onemap.gov.sg/maps/tiles/Grey/{z}/{x}/{y}.png';
 const ONEMAP_DEFAULT = 'https://www.onemap.gov.sg/maps/tiles/Default/{z}/{x}/{y}.png';
 
 const SG_CENTER: [number, number] = [103.8198, 1.3521];
-const POI_LABEL_ZOOM = 14;
+const POI_LABEL_ZOOM = 15.5;
 
 const DEMO_HOSPITAL_POIS: MapPoi[] = [
   { id: 'H-SGH', name: 'SGH', detail: 'Hospital · demo fallback', lng: 103.8359, lat: 1.2806, source: 'demo' },
