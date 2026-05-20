@@ -30,15 +30,24 @@ async function snap(page, label) {
 }
 
 async function snapDrawer(page, label) {
-  // Capture only the open drawer so the wireframe tile shows the workspace
-  // content rather than the underlying map.
-  await page.waitForTimeout(300);
-  const drawer = page.locator('aside').first();
-  const visible = await drawer.isVisible().catch(() => false);
-  if (!visible) return;
+  // Capture the right-edge column where the workspace drawer lives. Using a
+  // viewport clip is deterministic — element-based shots failed on heavier
+  // workspaces because layout settled after the timeout.
+  await page.waitForTimeout(400);
+  const vp = page.viewportSize();
+  if (!vp) return;
+  const drawerWidth = 540;
   const path = join(OUT_DIR, `${(SHOTS.length - 1).toString().padStart(2, '0')}-${label}-drawer.png`);
   try {
-    await drawer.screenshot({ path });
+    await page.screenshot({
+      path,
+      clip: {
+        x: Math.max(0, vp.width - drawerWidth),
+        y: 0,
+        width: Math.min(drawerWidth, vp.width),
+        height: vp.height,
+      },
+    });
     console.log('    ↳ drawer', label);
   } catch (err) {
     console.warn('    ! drawer skipped', label, err.message);

@@ -224,9 +224,6 @@
     object-position: center 18%;
   }
   .img-real.contain img { object-fit: contain; object-position: center center; }
-  /* Drawer-focused shots: the right ~38% holds the feature content */
-  .img-real.shot-right img { object-position: 88% center; }
-  .img-real.shot-center img { object-position: center center; }
   /* Per-portrait fine-tuning: each face sits at a slightly different ratio */
   .img-real.face-mei img    { object-position: center 22%; }
   .img-real.face-daniel img { object-position: center 28%; }
@@ -897,8 +894,10 @@
 
       <div class="panel">
         <div class="panel-label amber">RESPONDER · 13 SLASH COMMANDS</div>
-        <div class="img-real shot-right" style="height: 130px; margin-top: 4px; background: var(--bg-2); border-color: var(--border);">
-          <img src="shots/s06-responder-copilot.png" alt="Responder mission board with slash command composer">
+        <div class="img-real" style="height: 130px; margin-top: 4px; background: var(--bg-2); border-color: var(--border);">
+          <div class="img-slot" style="height: 100%; border: none;">
+            <div class="note" style="font-size: 11px; max-width: 92%;">Screenshot · case-room SlashComposer dropdown (crop from feature-shots/17-responder-case-room.png)</div>
+          </div>
         </div>
         <div class="panel-body" style="font-size: 12px; margin-top: 8px;">
           <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2px 14px; line-height: 1.35;">
@@ -940,8 +939,8 @@
     <div class="panel">
       <div class="panel-label">CITIZEN</div>
       <div class="panel-title">Raises the signal</div>
-      <div class="img-real shot-center" style="height: 320px; margin: 12px 0;">
-        <img src="shots/s07-citizen-home.png" alt="Citizen home map with SOS button and AI advisor">
+      <div class="img-slot" style="height: 320px; margin: 12px 0;">
+        <div class="note">Screenshot · feature-shots/00-shell-citizen-map.png — citizen map with SOS button, AI advisor, nearby alerts</div>
       </div>
       <div class="panel-body" style="font-size: 14px;">
         Files <strong style="color: var(--text);">REPORT-281</strong> with category, GPS, evidence, severity. Same record, instantly visible to verifying ops and responders within range.
@@ -951,8 +950,8 @@
     <div class="panel">
       <div class="panel-label amber">RESPONDER</div>
       <div class="panel-title">Acts on the signal</div>
-      <div class="img-real shot-right" style="height: 320px; margin: 12px 0;">
-        <img src="shots/s07-responder-joinable.png" alt="Responder joinable missions with fit-scored SOS">
+      <div class="img-slot" style="height: 320px; margin: 12px 0;">
+        <div class="note">Screenshot · feature-shots/11-responder-joinable-missions.png — Mission Board, fit-scored joinable cases</div>
       </div>
       <div class="panel-body" style="font-size: 14px;">
         Reads <strong style="color: var(--text);">REPORT-281</strong> → joins <strong style="color: var(--text);">CASE-281</strong>. Status, position, beats, AAR — all written back to the same record ops already has open.
@@ -962,8 +961,8 @@
     <div class="panel">
       <div class="panel-label cyan">OPS</div>
       <div class="panel-title">Verifies, dispatches, broadcasts</div>
-      <div class="img-real shot-right" style="height: 320px; margin: 12px 0;">
-        <img src="shots/s07-ops-report-queue.png" alt="Ops report queue with incoming citizen reports">
+      <div class="img-slot" style="height: 320px; margin: 12px 0;">
+        <div class="note">Screenshot · feature-shots/19-ops-report-queue.png — Report queue, dispatch dock, zone tools</div>
       </div>
       <div class="panel-body" style="font-size: 14px;">
         Sees corroboration count, declares <strong style="color: var(--text);">EVENT-281</strong>, dispatches, draws a zone, broadcasts back to citizens — every action chained to the same incident ID.
@@ -1070,8 +1069,8 @@
         <div><div class="kpi-big" style="font-size: 60px;">24h</div><div class="kpi-label">POI themes</div></div>
       </div>
     </div>
-    <div class="img-real shot-right" style="flex: 1; min-height: 200px;">
-      <img src="shots/s08-source-health.png" alt="Ops source health panel with per-tier freshness state">
+    <div class="img-slot" style="flex: 1; min-height: 200px;">
+      <div class="note">Screenshot · source-health panel showing each tier with green/amber state, age in seconds (use the smoke-readiness.png or a clean dev-tools shot of /api/live/snapshot)</div>
     </div>
   </div>
 
@@ -1089,25 +1088,25 @@
   <div class="grid-4" style="margin-top: 48px;">
     <div class="panel">
       <div class="panel-label">STEP 01</div>
-      <div class="img-real shot-right" style="height: 360px;"><img src="shots/s09-citizen-2-sos-draft.png" alt="Citizen SOS category picker"></div>
+      <div class="img-slot" style="height: 360px;"><div class="note">feature-shots/01-citizen-sos-category.png — SOS category picker (Medical · Fire · Hazard · Crash · Crime)</div></div>
       <div class="panel-title" style="font-size: 22px; margin-top: 14px;">Choose category</div>
       <div class="panel-body" style="font-size: 13px;">L1–L5 severity auto-tagged. GPS captured. Voice or text optional.</div>
     </div>
     <div class="panel">
       <div class="panel-label">STEP 02</div>
-      <div class="img-real shot-center" style="height: 360px;"><img src="shots/s09-citizen-1-home.png" alt="Citizen map with active distress markers"></div>
+      <div class="img-slot" style="height: 360px;"><div class="note">feature-shots/02-citizen-sos-live.png — live SOS in progress with map ping, assigned responder card</div></div>
       <div class="panel-title" style="font-size: 22px; margin-top: 14px;">SOS goes live</div>
       <div class="panel-body" style="font-size: 13px;">MQTT pub QoS-1 to <code style="color:var(--info)">sos/{zone}/{id}</code>. Responders within 800 m–1.5 km notified.</div>
     </div>
     <div class="panel">
       <div class="panel-label">STEP 03</div>
-      <div class="img-real shot-right" style="height: 360px;"><img src="shots/s09-citizen-3-report.png" alt="Citizen report compose with location annotation"></div>
+      <div class="img-slot" style="height: 360px;"><div class="note">feature-shots/05-citizen-report-review.png — citizen report compose, AI helping with severity + evidence checklist</div></div>
       <div class="panel-title" style="font-size: 22px; margin-top: 14px;">Or file a report</div>
       <div class="panel-body" style="font-size: 13px;">Photo / video / voice evidence. Reverse-geocoded place name. Routed to ops queue.</div>
     </div>
     <div class="panel">
       <div class="panel-label">STEP 04</div>
-      <div class="img-real shot-right" style="height: 360px;"><img src="shots/s09-citizen-4-alerts.png" alt="Citizen nearby alerts with AI guidance"></div>
+      <div class="img-slot" style="height: 360px;"><div class="note">feature-shots/09-citizen-alerts-nearby.png — citizen alerts panel with AI guidance per alert</div></div>
       <div class="panel-title" style="font-size: 22px; margin-top: 14px;">Stay informed</div>
       <div class="panel-body" style="font-size: 13px;">AI advisor on every alert. Subscribe to home zone. Volunteer event sign-up.</div>
     </div>
@@ -1134,25 +1133,25 @@
   <div class="grid-4" style="margin-top: 48px;">
     <div class="panel">
       <div class="panel-label amber">STEP 01</div>
-      <div class="img-real shot-center" style="height: 360px;"><img src="shots/s10-responder-1-home.png" alt="Responder home with duty status and mission board"></div>
+      <div class="img-slot" style="height: 360px;"><div class="note">feature-shots/10-responder-shell.png — responder map view with mission board pill, duty-status indicator</div></div>
       <div class="panel-title" style="font-size: 22px; margin-top: 14px;">Go on duty</div>
       <div class="panel-body" style="font-size: 13px;">Available · Standby · On-Scene. Status broadcast on the responder topic for ops visibility.</div>
     </div>
     <div class="panel">
       <div class="panel-label amber">STEP 02</div>
-      <div class="img-real shot-right" style="height: 360px;"><img src="shots/s10-responder-3-joinable.png" alt="Responder joinable missions with fit ranking"></div>
+      <div class="img-slot" style="height: 360px;"><div class="note">feature-shots/11-responder-joinable-missions.png — Mission Board with fit-score ranking, distance, ETA chips</div></div>
       <div class="panel-title" style="font-size: 22px; margin-top: 14px;">Joinable missions</div>
       <div class="panel-body" style="font-size: 13px;">Fit-scored by role (medic / fire / volunteer), distance, severity. One-tap accept or join case.</div>
     </div>
     <div class="panel">
       <div class="panel-label amber">STEP 03</div>
-      <div class="img-real shot-right" style="height: 360px;"><img src="shots/s10-responder-2-mission-board.png" alt="Responder mission board case room overview"></div>
+      <div class="img-slot" style="height: 360px;"><div class="note">feature-shots/17-responder-case-room.png — case room with member roster, chat thread, Host AI replies</div></div>
       <div class="panel-title" style="font-size: 22px; margin-top: 14px;">Case room</div>
       <div class="panel-body" style="font-size: 13px;">Captain, members, status pipeline. Host AI with 13 slash commands. Photo / status updates.</div>
     </div>
     <div class="panel">
       <div class="panel-label amber">STEP 04</div>
-      <div class="img-real shot-right" style="height: 360px;"><img src="shots/s10-responder-4-groups.png" alt="Responder groups and case ledger"></div>
+      <div class="img-slot" style="height: 360px;"><div class="note">feature-shots/16-responder-groups-cases.png — groups + closed cases ledger with AAR drafts</div></div>
       <div class="panel-title" style="font-size: 22px; margin-top: 14px;">Wrap & learn</div>
       <div class="panel-body" style="font-size: 13px;">Captain closes the case. <code style="color:var(--info)">/host draft aar</code> auto-assembles the after-action report.</div>
     </div>
@@ -1179,25 +1178,25 @@
   <div class="grid-4" style="margin-top: 48px;">
     <div class="panel">
       <div class="panel-label cyan">STEP 01</div>
-      <div class="img-real shot-right" style="height: 360px;"><img src="shots/s11-ops-1-report-queue.png" alt="Ops report queue with corroboration counts"></div>
+      <div class="img-slot" style="height: 360px;"><div class="note">feature-shots/19-ops-report-queue.png — incoming citizen reports queued with corroboration count</div></div>
       <div class="panel-title" style="font-size: 22px; margin-top: 14px;">Triage reports</div>
       <div class="panel-body" style="font-size: 13px;">Pending / Claimed / Verified. Corroboration score from independent citizens. Claim → Verify → Declare.</div>
     </div>
     <div class="panel">
       <div class="panel-label cyan">STEP 02</div>
-      <div class="img-real shot-right" style="height: 360px;"><img src="shots/s11-ops-2-dispatch.png" alt="Ops dispatch dock with scored responder candidates"></div>
+      <div class="img-slot" style="height: 360px;"><div class="note">feature-shots/25-ops-dispatch.png — dispatch dock with responder candidates scored by distance + role fit</div></div>
       <div class="panel-title" style="font-size: 22px; margin-top: 14px;">Dispatch</div>
       <div class="panel-body" style="font-size: 13px;">Sort responders by haversine distance and role match. Assign with one click; case room auto-formed.</div>
     </div>
     <div class="panel">
       <div class="panel-label cyan">STEP 03</div>
-      <div class="img-real shot-right" style="height: 360px;"><img src="shots/s11-ops-3-declare.png" alt="Ops declare incident with polygon zone tools"></div>
+      <div class="img-slot" style="height: 360px;"><div class="note">feature-shots/23-ops-zones.png + 24-ops-zone-created.png — polygon drawer with severity ring, just-created zone overlay</div></div>
       <div class="panel-title" style="font-size: 22px; margin-top: 14px;">Draw a zone</div>
       <div class="panel-body" style="font-size: 13px;">Freehand polygon on the OneMap basemap. Auto-tagged with planning area + risk tier.</div>
     </div>
     <div class="panel">
       <div class="panel-label cyan">STEP 04</div>
-      <div class="img-real shot-right" style="height: 360px;"><img src="shots/s11-ops-4-broadcast.png" alt="Ops broadcast composer targeting drawn zone"></div>
+      <div class="img-slot" style="height: 360px;"><div class="note">feature-shots/26-ops-broadcast.png + 27-ops-broadcast-queued.png — broadcast composer targeting zone, push receipts</div></div>
       <div class="panel-title" style="font-size: 22px; margin-top: 14px;">Broadcast</div>
       <div class="panel-body" style="font-size: 13px;">Zone-targeted notification, MQTT-fanned to citizens + responders in the polygon. Receipts tracked per subscriber.</div>
     </div>
