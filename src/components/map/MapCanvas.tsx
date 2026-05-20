@@ -457,13 +457,6 @@ export default function MapCanvas() {
         };
         const marker = new maplibregl.Marker({ element: el })
           .setLngLat([e.location.lng, e.location.lat])
-          .setPopup(
-            new Popup({ offset: 12, closeButton: false }).setHTML(
-              `<div style="font-family:ui-sans-serif;font-size:10px;text-transform:uppercase;font-weight:700;letter-spacing:0.1em">${e.title}${
-                e.liveValue ? ' · ' + e.liveValue : ''
-              }</div>`
-            )
-          )
           .addTo(m);
         markerStore.current.push(marker);
       }
@@ -698,7 +691,6 @@ function addIconMarker(
   }`;
   el.type = 'button';
   el.setAttribute('aria-label', `${opts.label}: ${opts.title}`);
-  el.title = `${opts.title} · ${opts.body}`;
   el.innerHTML = `<span aria-hidden="true">${mapIconMarkup(opts.icon, 16)}</span>${
     opts.medium ? `<strong>${opts.label}</strong>` : ''
   }`;
