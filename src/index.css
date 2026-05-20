@@ -148,3 +148,29 @@ body {
 .qa-hover-popup {
   pointer-events: none;
 }
+
+@media (max-width: 640px) {
+  .qa-role-chip {
+    display: none;
+  }
+
+  .qa-brand-chip {
+    font-size: 10px;
+    padding-left: 8px;
+    padding-right: 8px;
+    max-width: 46vw;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}
+
+@media (max-width: 390px) {
+  .qa-brief-label {
+    display: none;
+  }
+
+  .qa-brief-btn {
+    min-width: 32px;
+    justify-content: center;
+  }
+}

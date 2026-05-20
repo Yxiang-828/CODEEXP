@@ -1,11 +1,12 @@
 import { useState } from 'react';
 import type React from 'react';
-import { MapPin, Clock, FileText, Radio, ChevronRight, Camera, Mic, X, CheckCircle2 } from 'lucide-react';
+import { MapPin, Clock, FileText, Radio, ChevronRight, Camera, Mic, X, CheckCircle2, Bot, Sparkles } from 'lucide-react';
 import { useAppContext } from '../../../AppContext';
 import type { CanonicalEvent, VolunteerEvent } from '../../../AppContext';
 import SeverityChip from '../../primitives/SeverityChip';
 import StatusPipeline from '../../primitives/StatusPipeline';
 import { etaMinutes, filterWithinKm, getDistanceKm } from '../../../utils/geo';
+import { askHostAi, type HostAiResponse } from '../../../services/hostAi';
 
 export function LocalAlertDetail() {
   const { events, selectedId, setDrawerContent } = useAppContext();
@@ -73,26 +74,81 @@ export function LocalAlertDetail() {
 }
 
 export function IncidentGuidance() {
-  const { setDrawerContent } = useAppContext();
+  const { setDrawerContent, events, selectedId, selectedMapItem } = useAppContext();
+  const [ai, setAi] = useState<HostAiResponse | null>(null);
+  const [loadingAi, setLoadingAi] = useState(false);
+  const event = events.find((e) => e.id === selectedId) ?? events[0];
+  const kind =
+    selectedMapItem?.category === 'Traffic'
+      ? 'crash'
+      : event?.kind ?? 'other';
+  const guide = guidanceFor(kind);
+  const loadAi = async () => {
+    setLoadingAi(true);
+    const reply = await askHostAi({
+      role: 'citizen',
+      workspace: 'incident_guidance',
+      prompt: `Give citizen-safe guidance for ${event?.title ?? selectedMapItem?.title ?? kind}.`,
+      context: {
+        kind,
+        title: event?.title ?? selectedMapItem?.title,
+        source: event?.source ?? selectedMapItem?.source,
+      },
+    }).catch(() => ({
+      state: 'unavailable' as const,
+      text: 'Host AI unavailable. Use the safety checklist above.',
+      chips: [{ label: 'tool: host_ai', ref: 'unavailable' }],
+    }));
+    setAi(reply);
+    setLoadingAi(false);
+  };
+  const tabs = ['Assess', 'Act', 'After'] as const;
+  const [activeTab, setActiveTab] = useState<typeof tabs[number]>('Assess');
+  const phaseSteps = guide.phases[activeTab];
+
   return (
     <div className="flex flex-col h-full">
       <div className="flex border-b border-border-strong">
-        {['Assess', 'Act', 'After'].map((t, i) => (
-          <div
+        {tabs.map((t) => (
+          <button
             key={t}
-            className={`flex-1 text-center py-3 text-[10px] font-black uppercase tracking-widest border-r border-border-strong last:border-r-0 ${
-              i === 0 ? 'bg-surface-3 text-text-inverse' : 'opacity-50'
+            onClick={() => setActiveTab(t)}
+            className={`flex-1 py-3 text-[10px] font-black uppercase tracking-widest border-r border-border-strong last:border-r-0 transition-colors ${
+              activeTab === t ? 'bg-surface-3 text-text-inverse' : 'bg-surface-0 text-text-primary hover:bg-surface-2'
             }`}
           >
             {t}
-          </div>
+          </button>
         ))}
       </div>
-      <div className="p-5 flex-1 flex flex-col gap-3">
-        <h2 className="text-xl font-serif italic font-black">1. Move to safety</h2>
-        <Card>Do not walk through moving water. Six inches can knock you over.</Card>
-        <Card>Avoid driving into flooded roads. Abandon vehicle if water rises.</Card>
-        <Card>Stay with someone if possible.</Card>
+      <div className="p-5 flex-1 overflow-y-auto flex flex-col gap-3">
+        <h2 className="text-xl font-serif italic font-black">{guide.title}</h2>
+        {phaseSteps.map((step) => (
+          <div key={step}>
+            <Card>{step}</Card>
+          </div>
+        ))}
+        {activeTab === 'Act' && (
+          <>
+            <button
+              onClick={loadAi}
+              disabled={loadingAi}
+              className="w-full bg-surface-3 text-text-inverse py-3 text-[10px] font-bold uppercase tracking-widest border border-border-strong shadow-[3px_3px_0_rgba(26,26,26,1)] flex items-center justify-center gap-2 disabled:opacity-60"
+            >
+              <Sparkles className="w-3 h-3" />
+              {loadingAi ? 'Loading AI suggestion' : 'Load AI suggestion'}
+            </button>
+            {ai && (
+              <Card>
+                <strong className="flex items-center gap-1 uppercase tracking-widest text-[9px] mb-1">
+                  <Bot className="w-3 h-3" />
+                  AI suggestion · {ai.state}
+                </strong>
+                {ai.text}
+              </Card>
+            )}
+          </>
+        )}
       </div>
       <div className="p-4 border-t border-border-strong flex flex-col gap-2">
         <button
@@ -322,16 +378,16 @@ export function ReportCompose() {
             {photoAttached && <span className="block mt-2 font-mono text-[10px]">evidence: photo marker attached</span>}
           </Card>
           <p className="text-[10px] uppercase font-bold tracking-widest text-text-secondary">
-            Will appear in ops report queue + responder verify queue immediately.
+            Will appear in the ops report queue only. Responders see it only after ops verifies and publishes an incident.
           </p>
         </div>
       )}
       {step === 5 && (
         <div className="p-5 flex-1 flex flex-col gap-3">
           <h3 className="text-xl font-serif italic font-black text-accent-success">Report filed.</h3>
-          <Card>It is now in the ops queue and visible to nearby responders.</Card>
+          <Card>It is now in the ops queue. You will get a notification after ops verifies or dismisses it.</Card>
           <p className="text-[10px] uppercase font-bold tracking-widest text-text-secondary">
-            Switch role to Responder or Ops to see it land.
+            SOS is the only citizen flow broadcast directly to both ops and responders.
           </p>
         </div>
       )}
@@ -367,7 +423,7 @@ export function NeedHelpSOS() {
       <div className="p-5 bg-accent-critical text-text-inverse">
         <h2 className="text-2xl font-serif italic font-black">Need help</h2>
         <p className="text-[10px] uppercase font-bold tracking-widest mt-1 opacity-90">
-          Pick a category. Help is dispatched immediately.
+          Pick a category. Ops and suitable responders are notified immediately.
         </p>
       </div>
       <div className="p-5 grid grid-cols-2 gap-2 flex-1">
@@ -397,7 +453,7 @@ export function NeedHelpSOS() {
 }
 
 export function SosLive() {
-  const { sosSessions, responders, assignSos, advanceSos, cancelSos } = useAppContext();
+  const { sosSessions, responders, advanceSos, confirmSosSafe, cancelSos } = useAppContext();
   const active = sosSessions.find((s) => !['resolved', 'cancelled'].includes(s.status));
   if (!active) return <Empty />;
   const steps = ['Requesting', 'Acknowledged', 'En route', 'Arrived', 'Resolving', 'Resolved'];
@@ -423,7 +479,7 @@ export function SosLive() {
             <div className="text-[10px] mt-1 font-mono">Live GPS shared. Track on map.</div>
           </Card>
         ) : (
-          <Card>Waiting for responder match…</Card>
+          <Card>Waiting for ops or a suitable responder to accept. This is visible to both ops and responders.</Card>
         )}
         <Card>
           <strong className="block uppercase tracking-widest text-[9px] mb-1">What they can see</strong>
@@ -431,14 +487,6 @@ export function SosLive() {
         </Card>
       </div>
       <div className="p-4 mt-auto border-t border-border-strong flex flex-col gap-2">
-        {active.status === 'requesting' && (
-          <button
-            onClick={() => assignSos(active.id, 'R-ECHO-1')}
-            className="w-full bg-accent-info text-text-inverse py-3 text-[10px] uppercase font-bold tracking-widest border border-border-strong shadow-[3px_3px_0_rgba(26,26,26,1)]"
-          >
-            Accept as Echo-1 responder
-          </button>
-        )}
         {(active.status === 'ack' || active.status === 'en_route') && (
           <button
             onClick={() => advanceSos(active.id, 'arrived')}
@@ -447,41 +495,51 @@ export function SosLive() {
             Mark responder arrived
           </button>
         )}
-        {active.status === 'arrived' && (
+        {(active.status === 'arrived' || active.status === 'resolving') && (
           <button
-            onClick={() => advanceSos(active.id, 'resolved')}
+            onClick={() => confirmSosSafe(active.id, 'citizen')}
+            disabled={active.citizenConfirmedSafe}
             className="w-full bg-accent-success text-surface-3 py-3 text-[10px] uppercase font-bold tracking-widest border border-border-strong shadow-[3px_3px_0_rgba(26,26,26,1)]"
           >
-            Mark resolved
+            {active.citizenConfirmedSafe ? 'Citizen safe ack sent' : 'I am safe / request closure'}
           </button>
         )}
-        <button
-          onClick={() => cancelSos(active.id)}
-          className="w-full bg-surface-0 py-3 text-[10px] uppercase font-bold tracking-widest border border-border-strong"
-        >
-          Cancel SOS
-        </button>
+        {active.status === 'requesting' && (
+          <button
+            onClick={() => cancelSos(active.id)}
+            className="w-full bg-surface-0 py-3 text-[10px] uppercase font-bold tracking-widest border border-border-strong"
+          >
+            Cancel SOS
+          </button>
+        )}
       </div>
     </div>
   );
 }
 
 export function BriefingSpace() {
-  const { events, reports, setSelectedId, setDrawerContent, liveSnapshot } = useAppContext();
-  const items: { id: string; title: string; meta: string; severity: 1 | 2 | 3 | 4 | 5; kind: 'event' | 'report' }[] = [
+  const { events, reports, sosSessions, role, setSelectedId, setDrawerContent, liveSnapshot } = useAppContext();
+  const items: { id: string; title: string; meta: string; severity: 1 | 2 | 3 | 4 | 5; target: string }[] = [
     ...events.filter((e) => e.status === 'verified').map((e) => ({
       id: e.id,
       title: e.title + (e.liveValue ? ' · ' + e.liveValue : ''),
       meta: e.source,
       severity: e.severity,
-      kind: 'event' as const,
+      target: 'local_alert',
     })),
-    ...reports.filter((r) => r.status === 'pending').map((r) => ({
+    ...(role === 'ops' ? reports.filter((r) => r.status === 'pending' || r.status === 'claimed') : []).map((r) => ({
       id: r.id,
       title: 'Report · ' + r.title,
-      meta: 'Unverified · ' + fmtAgo(r.createdAt),
+      meta: 'Ops-only · ' + r.status + ' · ' + fmtAgo(r.createdAt),
       severity: 2 as const,
-      kind: 'report' as const,
+      target: 'report_queue',
+    })),
+    ...(role !== 'citizen' ? sosSessions.filter((s) => !['resolved', 'cancelled'].includes(s.status)) : []).map((s) => ({
+      id: s.id,
+      title: 'SOS · ' + s.category,
+      meta: 'Visible to ops and responders · ' + s.status,
+      severity: 4 as const,
+      target: role === 'ops' ? 'distress_oversight' : 'assignment_detail',
     })),
   ];
   return (
@@ -503,7 +561,7 @@ export function BriefingSpace() {
             key={it.id}
             onClick={() => {
               setSelectedId(it.id);
-              setDrawerContent(it.kind === 'event' ? 'local_alert' : 'briefing');
+              setDrawerContent(it.target);
             }}
             className="w-full flex items-center gap-3 p-3 border-b border-border-strong hover:bg-surface-2 text-left"
           >
@@ -604,6 +662,61 @@ export function AlertsState() {
   );
 }
 
+export function CitizenAssistant() {
+  const { events, sosSessions, notifications } = useAppContext();
+  const [prompt, setPrompt] = useState('What should I do near my current alert?');
+  const [reply, setReply] = useState<HostAiResponse | null>(null);
+  const [loading, setLoading] = useState(false);
+  const ask = async () => {
+    setLoading(true);
+    const result = await askHostAi({
+      role: 'citizen',
+      workspace: 'citizen_ai',
+      prompt,
+      context: {
+        activeEvents: events.slice(0, 4),
+        activeSos: sosSessions.filter((s) => !['resolved', 'cancelled'].includes(s.status)),
+        notifications: notifications.filter((n) => n.roles.includes('citizen')).slice(0, 4),
+      },
+    }).catch(() => ({
+      state: 'unavailable' as const,
+      text: 'Host AI unavailable. Use official instructions and call 995/999 if there is immediate danger.',
+      chips: [{ label: 'tool: host_ai', ref: 'unavailable' }],
+    }));
+    setReply(result);
+    setLoading(false);
+  };
+  return (
+    <div className="p-5 flex flex-col gap-4">
+      <h2 className="text-xl font-serif italic font-black flex items-center gap-2">
+        <Bot className="w-4 h-4" />
+        Citizen AI
+      </h2>
+      <Card>
+        Ask for plain-language safety guidance. It loads only when you press ask and must say unavailable instead of inventing live data.
+      </Card>
+      <textarea
+        value={prompt}
+        onChange={(e) => setPrompt(e.target.value)}
+        className="w-full h-28 p-3 border border-border-strong bg-surface-0 text-sm font-mono resize-none outline-none focus:border-text-primary"
+      />
+      <button
+        onClick={ask}
+        disabled={loading}
+        className="w-full bg-surface-3 text-text-inverse py-3 text-[10px] uppercase font-bold tracking-widest border border-border-strong shadow-[3px_3px_0_rgba(26,26,26,1)] disabled:opacity-60"
+      >
+        {loading ? 'Asking Host AI' : 'Ask Host AI'}
+      </button>
+      {reply && (
+        <Card>
+          <strong className="block uppercase tracking-widest text-[9px] mb-1">Host AI · {reply.state}</strong>
+          {reply.text}
+        </Card>
+      )}
+    </div>
+  );
+}
+
 function EmptyRow({ children }: { children: React.ReactNode }) {
   return (
     <div className="p-3 text-[10px] uppercase font-bold tracking-widest text-text-secondary">
@@ -673,6 +786,149 @@ function Empty() {
       Nothing to show.
     </div>
   );
+}
+
+type GuidancePhases = { Assess: string[]; Act: string[]; After: string[] };
+type Guidance = { title: string; phases: GuidancePhases };
+
+function guidanceFor(kind: CanonicalEvent['kind']): Guidance {
+  const guides: Record<CanonicalEvent['kind'], Guidance> = {
+    fire: {
+      title: 'Fire nearby',
+      phases: {
+        Assess: [
+          'Check if smoke is inside your unit or corridor before opening doors.',
+          'If heavy smoke is present outside, stay inside and seal door gaps with wet cloth.',
+        ],
+        Act: [
+          'Leave via stairs if the escape route is clear. Do not use lifts.',
+          'Close doors behind you to slow smoke spread.',
+          'If trapped, call 995 and signal from a window. Stay low near the floor.',
+        ],
+        After: [
+          'Do not re-enter the building until SCDF declares it safe.',
+          'Report injuries to emergency services. Keep bystanders away from the perimeter.',
+          'File a report through this app so ops can update the incident status.',
+        ],
+      },
+    },
+    flood: {
+      title: 'Flood or flash flood',
+      phases: {
+        Assess: [
+          'Check water level at the nearest road or drain before moving.',
+          'Shallow fast-moving water (15 cm) can knock an adult off their feet.',
+        ],
+        Act: [
+          'Do not drive or walk into flooded roads. Turn around early.',
+          'Move to higher ground immediately if water is rising.',
+          'Keep children and pets away from drains and canals.',
+        ],
+        After: [
+          'Do not return until water has receded and the area is cleared.',
+          'Document water damage with photos for insurance before cleaning up.',
+          'Watch for contaminated water — do not drink tap water until PUB confirms it is safe.',
+        ],
+      },
+    },
+    medical: {
+      title: 'Medical emergency',
+      phases: {
+        Assess: [
+          'Check responsiveness — tap the person firmly and call out.',
+          'Look for breathing. If absent or gasping, this is a cardiac arrest — act immediately.',
+        ],
+        Act: [
+          'Call 995. Do not hang up. Follow dispatcher instructions.',
+          'If trained: start CPR at 100–120 compressions per minute, 5 cm depth.',
+          'Send someone to get the nearest AED. Apply as soon as it arrives.',
+          'Do not move the person unless the location is immediately dangerous.',
+        ],
+        After: [
+          'Stay with the person until paramedics take over.',
+          'Brief SCDF on any medications, allergies, or circumstances you observed.',
+          'You may experience shock — rest, hydrate, and seek support if needed.',
+        ],
+      },
+    },
+    crash: {
+      title: 'Road accident',
+      phases: {
+        Assess: [
+          'Stay off the road and behind barriers. Do not walk across live lanes.',
+          'Check for fuel spills, smoke, or fire before approaching.',
+        ],
+        Act: [
+          'Call 995 for injuries or 999 if there is a security threat.',
+          'Warn oncoming drivers with hazard lights or by waving from a safe position.',
+          'Do not move crash victims unless there is immediate fire or flood risk.',
+        ],
+        After: [
+          'Provide your contact details to traffic police if you witnessed the crash.',
+          'Do not post live video of victims to social media.',
+          'File a report here with your location so ops can coordinate traffic management.',
+        ],
+      },
+    },
+    hazard: {
+      title: 'Chemical or structural hazard',
+      phases: {
+        Assess: [
+          'Stay upwind and uphill from any smoke, chemical smell, or spill.',
+          'Do not touch fallen cables, unknown liquids, or unstable debris.',
+        ],
+        Act: [
+          'Move at least 100 m away and keep others back.',
+          'Cover nose and mouth if there is an odour — improvise with a damp cloth.',
+          'Call 995. Report the exact street address and describe what you see.',
+        ],
+        After: [
+          'Do not return until SCDF or ops clears the area.',
+          'Wash exposed skin thoroughly with soap and water.',
+          'Report exact location and any signage or container labels you saw.',
+        ],
+      },
+    },
+    weather: {
+      title: 'Severe weather',
+      phases: {
+        Assess: [
+          'Check NEA alerts for thunderstorm, haze, or flood advisory level.',
+          'PSI above 100 is unhealthy. Above 200 is very unhealthy.',
+        ],
+        Act: [
+          'Move indoors before lightning arrives — do not wait for rain.',
+          'Avoid open fields, tall isolated trees, and metal structures during lightning.',
+          'Reduce strenuous outdoor activity during haze. Use N95 masks above PSI 150.',
+        ],
+        After: [
+          'Check on elderly and vulnerable neighbours after severe weather.',
+          'Clear debris from drains near your home to prevent secondary flooding.',
+          'Follow official recovery instructions before resuming outdoor activities.',
+        ],
+      },
+    },
+    other: {
+      title: 'Unknown incident',
+      phases: {
+        Assess: [
+          'Move away from the immediate area before assessing the situation.',
+          'Observe from a safe distance. Note time, location, and what you see.',
+        ],
+        Act: [
+          'Call 995 for fire/medical or 999 for immediate police threat.',
+          'Do not enter restricted or unstable areas.',
+          'Follow any ops alerts broadcast through this app.',
+        ],
+        After: [
+          'File a report here so ops can verify and escalate if needed.',
+          'Stay available in case emergency services need your account as a witness.',
+          'Check the alerts feed for updates before returning to the area.',
+        ],
+      },
+    },
+  };
+  return guides[kind] ?? guides.other;
 }
 
 function fmtAgo(ts: number) {

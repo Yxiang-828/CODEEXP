@@ -6,6 +6,7 @@ import WorkspaceDrawer from './layout/WorkspaceDrawer';
 import BottomStrip from './layout/BottomStrip';
 import TrackingPill from './primitives/TrackingPill';
 import DemoLogin from './DemoLogin';
+import PermissionPrompt from './PermissionPrompt';
 import { useAppContext } from '../AppContext';
 
 export default function Shell() {
@@ -27,6 +28,7 @@ export default function Shell() {
         </main>
         <WorkspaceDrawer />
       </div>
+      <PermissionPrompt />
     </div>
   );
 }

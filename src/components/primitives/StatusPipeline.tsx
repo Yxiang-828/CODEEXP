@@ -1,6 +1,8 @@
 // Horizontal step pipeline for SOS / assignment lifecycle.
 // Per DESIGN.md § 3.4 - Grab-style filled progression.
 
+import { Check } from 'lucide-react';
+
 interface Props {
   steps: string[];
   currentIndex: number; // 0-based; -1 means none reached
@@ -15,9 +17,8 @@ export default function StatusPipeline({
   className = '',
 }: Props) {
   return (
-    <div
-      className={`flex items-stretch border border-border-strong bg-surface-0 shadow-[2px_2px_0px_rgba(26,26,26,1)] ${className}`}
-    >
+    <div className={`overflow-x-auto border border-border-strong bg-surface-0 shadow-[2px_2px_0px_rgba(26,26,26,1)] ${className}`}>
+      <div className="flex items-stretch min-w-max">
       {steps.map((label, i) => {
         const reached = i <= currentIndex;
         const isCurrent = i === currentIndex;
@@ -29,17 +30,18 @@ export default function StatusPipeline({
         return (
           <div
             key={label}
-            className={`flex-1 flex items-center justify-center gap-2 px-2 py-2 text-[9px] uppercase font-bold tracking-widest border-r border-border-strong last:border-r-0 ${tone}`}
+            className={`min-w-[112px] flex-1 flex items-center justify-center gap-2 px-2 py-2 text-[9px] uppercase font-bold tracking-widest border-r border-border-strong last:border-r-0 ${tone}`}
           >
-            <span
-              className={`inline-block w-2 h-2 border border-border-strong ${
-                reached ? 'bg-text-inverse' : 'bg-surface-1'
-              }`}
-            />
+            <span className={`inline-flex w-4 h-4 items-center justify-center border border-border-strong ${
+              reached ? 'bg-accent-success text-text-primary' : 'bg-surface-1'
+            }`}>
+              {reached && <Check className="w-3 h-3" />}
+            </span>
             <span className="truncate">{label}</span>
           </div>
         );
       })}
+      </div>
     </div>
   );
 }

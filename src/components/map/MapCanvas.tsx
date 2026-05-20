@@ -13,6 +13,7 @@ import {
   Eraser,
   Undo2,
   Grid3x3,
+  Radio,
   Siren,
   Hospital,
   Zap,
@@ -100,6 +101,7 @@ export default function MapCanvas() {
     responders,
     sosSessions,
     cases,
+    drawerContent,
     setSelectedId,
     setDrawerContent,
     setSelectedMapItem,
@@ -113,8 +115,19 @@ export default function MapCanvas() {
   const [draftPolygon, setDraftPolygon] = useState<LngLat[]>([]);
   const [liveLayers, setLiveLayers] = useState<LiveMapLayers | null>(null);
   const [layerStatus, setLayerStatus] = useState<'loading' | 'live' | 'demo' | 'partial'>('loading');
+  const [showLabels, setShowLabels] = useState(true);
+  const [visibleLayers, setVisibleLayers] = useState({
+    disaster: true,
+    hospital: true,
+    aed: true,
+    traffic: true,
+    mrt: true,
+    responders: true,
+    sos: true,
+  });
 
-  const isDrawing = role === 'ops' && drawMode !== 'select';
+  const drawingSession = role === 'ops' && (drawerContent === 'declare' || drawerContent === 'broadcast');
+  const isDrawing = drawingSession && drawMode === 'polygon';
 
   useEffect(() => {
     let alive = true;
@@ -154,6 +167,12 @@ export default function MapCanvas() {
   const mrtStatus = liveLayers?.mrt.length ? liveLayers.mrt : MRT_STATUS;
   const aedPois = allAedPois.slice(0, 80);
   const trafficPois = allTrafficPois.slice(0, 120);
+
+  useEffect(() => {
+    if (drawingSession) return;
+    setDrawMode('select');
+    setDraftPolygon([]);
+  }, [drawingSession]);
 
   // ---- map init ----
   useEffect(() => {
@@ -311,7 +330,7 @@ export default function MapCanvas() {
       const pois = containerRef.current?.querySelectorAll('.qa-poi-marker');
       if (!pois) return;
       pois.forEach((el) => {
-        if (z >= POI_LABEL_ZOOM) {
+        if (z >= POI_LABEL_ZOOM && labelsRef.current) {
           el.classList.remove('qa-poi-compact');
         } else {
           el.classList.add('qa-poi-compact');
@@ -449,10 +468,10 @@ export default function MapCanvas() {
       markerStore.current = [];
 
       const role = roleRef.current;
-      const visibleEvents = events;
-      const visibleResp = role === 'citizen' ? [] : responders;
+      const visibleEvents = visibleLayers.disaster ? events : [];
+      const visibleResp = role === 'citizen' || !visibleLayers.responders ? [] : responders;
       const visibleSos = sosSessions.filter(
-        (s) => !['resolved', 'cancelled'].includes(s.status)
+        (s) => visibleLayers.sos && !['resolved', 'cancelled'].includes(s.status)
       );
 
       for (const e of visibleEvents) {
@@ -494,23 +513,36 @@ export default function MapCanvas() {
       }
 
       for (const r of visibleResp) {
+        const isOfficial = r.unitType === 'professional';
         const tone =
-          r.status === 'en_route'
+          isOfficial
+            ? 'bg-blue-400 text-white'
+            : r.status === 'en_route'
             ? 'bg-yellow-200 text-black'
             : r.status === 'on_scene'
             ? 'bg-green-400 text-black'
             : 'bg-black text-white';
+        const label = isOfficial
+          ? role === 'ops'
+            ? r.org.slice(0, 3)
+            : r.covert
+            ? 'OFF'
+            : r.org.slice(0, 3)
+          : r.name[0];
+        const title = isOfficial && r.covert && role !== 'ops'
+          ? 'Official unit · movement visible · label hidden'
+          : `${r.name} · ${r.org} · ${r.status}${r.demo ? ' · demo professional' : ''}`;
         const el = document.createElement('div');
         el.className = `responder-pin -ml-3 -mt-3 w-6 h-6 ${tone} border border-black flex items-center justify-center shadow-[2px_2px_0_#000]`;
-        el.title = `${r.name} · ${r.org} · ${r.status}`;
-        el.innerHTML = `<span style="font-size:9px;font-weight:900;font-family:ui-monospace">${r.name[0]}</span>`;
+        el.title = title;
+        el.innerHTML = `<span style="font-size:9px;font-weight:900;font-family:ui-monospace">${label}</span>`;
         const marker = new maplibregl.Marker({ element: el })
           .setLngLat([r.location.lng, r.location.lat])
           .addTo(m);
         markerStore.current.push(marker);
       }
 
-      for (const h of hospitalPois) {
+      if (visibleLayers.hospital) for (const h of hospitalPois) {
         markerStore.current.push(
           addIconMarker(m, [h.lng, h.lat], {
             title: h.name,
@@ -519,6 +551,7 @@ export default function MapCanvas() {
             icon: Hospital,
             label: 'Hospital',
             medium: false,
+            labels: showLabels,
             popupStore: hoverPopupStore.current,
             onClick: () => {
               setSelectedMapItem(toSelectedMapItem(h, 'Hospital', 'OneMap'));
@@ -528,7 +561,7 @@ export default function MapCanvas() {
         );
       }
 
-      for (const aed of aedPois) {
+      if (visibleLayers.aed) for (const aed of aedPois) {
         markerStore.current.push(
           addIconMarker(m, [aed.lng, aed.lat], {
             title: aed.name,
@@ -537,6 +570,7 @@ export default function MapCanvas() {
             icon: Zap,
             label: 'AED',
             medium: false,
+            labels: showLabels,
             popupStore: hoverPopupStore.current,
             onClick: () => {
               setSelectedMapItem(toSelectedMapItem(aed, 'AED', 'OneMap'));
@@ -546,7 +580,7 @@ export default function MapCanvas() {
         );
       }
 
-      for (const traffic of trafficPois) {
+      if (visibleLayers.traffic) for (const traffic of trafficPois) {
         markerStore.current.push(
           addIconMarker(m, [traffic.lng, traffic.lat], {
             title: traffic.name,
@@ -555,6 +589,7 @@ export default function MapCanvas() {
             icon: TrafficCone,
             label: traffic.tone === 'ok' ? 'Traffic OK' : 'Traffic',
             medium: false,
+            labels: showLabels,
             popupStore: hoverPopupStore.current,
             onClick: () => {
               setSelectedMapItem(toSelectedMapItem(traffic, 'Traffic', 'LTA DataMall'));
@@ -564,7 +599,7 @@ export default function MapCanvas() {
         );
       }
 
-      for (const line of mrtStatus) {
+      if (visibleLayers.mrt) for (const line of mrtStatus) {
         const mid = line.path[Math.floor(line.path.length / 2)];
         markerStore.current.push(
           addIconMarker(m, mid as [number, number], {
@@ -574,6 +609,7 @@ export default function MapCanvas() {
             icon: Train,
             label: 'MRT',
             medium: false,
+            labels: showLabels,
             popupStore: hoverPopupStore.current,
             onClick: () => {
               setSelectedMapItem({
@@ -605,13 +641,19 @@ export default function MapCanvas() {
     aedPois,
     trafficPois,
     mrtStatus,
+    visibleLayers,
+    showLabels,
   ]);
 
   // capture latest role in ref for marker click handlers
   const roleRef = useRef(role);
+  const labelsRef = useRef(showLabels);
   useEffect(() => {
     roleRef.current = role;
   }, [role]);
+  useEffect(() => {
+    labelsRef.current = showLabels;
+  }, [showLabels]);
 
   const drawCellCount = Math.max(1, Math.floor(draftPolygon.length * 1.6));
   useEffect(() => {
@@ -619,7 +661,7 @@ export default function MapCanvas() {
   }, [draftPolygon.length]);
 
   const finishDraft = () => {
-    if (draftPolygon.length >= 3) setDrawerContent('declare');
+    if (draftPolygon.length >= 3) setDrawerContent(drawerContent === 'broadcast' ? 'broadcast' : 'declare');
   };
   const clearDraft = () => setDraftPolygon([]);
 
@@ -636,16 +678,26 @@ export default function MapCanvas() {
         MAP · SG · {role.toUpperCase()} · {layerStatus.toUpperCase()}
       </div>
 
-      <div className="absolute top-12 left-3 z-10 bg-white border border-black shadow-[3px_3px_0_#000] px-2 py-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 max-w-[360px]">
-        <LegendItem icon={Siren} label="Disaster" />
-        <LegendItem icon={Hospital} label="Hospital" />
-        <LegendItem icon={Zap} label="AED" />
-        <LegendItem icon={TrafficCone} label="Traffic" />
-        <LegendItem icon={Train} label="MRT" />
+      <div className="absolute top-12 left-3 z-10 bg-white border border-black shadow-[3px_3px_0_#000] p-1.5 flex flex-wrap items-center gap-1 max-w-[min(420px,calc(100vw-110px))]">
+        <FilterBtn icon={Siren} label="Disaster" active={visibleLayers.disaster} onClick={() => setVisibleLayers((v) => ({ ...v, disaster: !v.disaster }))} />
+        <FilterBtn icon={Hospital} label="Hospital" active={visibleLayers.hospital} onClick={() => setVisibleLayers((v) => ({ ...v, hospital: !v.hospital }))} />
+        <FilterBtn icon={Zap} label="AED" active={visibleLayers.aed} onClick={() => setVisibleLayers((v) => ({ ...v, aed: !v.aed }))} />
+        <FilterBtn icon={TrafficCone} label="Traffic" active={visibleLayers.traffic} onClick={() => setVisibleLayers((v) => ({ ...v, traffic: !v.traffic }))} />
+        <FilterBtn icon={Train} label="MRT" active={visibleLayers.mrt} onClick={() => setVisibleLayers((v) => ({ ...v, mrt: !v.mrt }))} />
+        {role !== 'citizen' && (
+          <FilterBtn icon={Radio} label="Units" active={visibleLayers.responders} onClick={() => setVisibleLayers((v) => ({ ...v, responders: !v.responders }))} />
+        )}
+        <FilterBtn icon={Siren} label="SOS" active={visibleLayers.sos} onClick={() => setVisibleLayers((v) => ({ ...v, sos: !v.sos }))} />
+        <button
+          onClick={() => setShowLabels((v) => !v)}
+          className={`px-2 py-1 border border-black text-[8px] font-black uppercase tracking-widest ${showLabels ? 'bg-yellow-200' : 'bg-white text-gray-500'}`}
+        >
+          Labels {showLabels ? 'on' : 'off'}
+        </button>
       </div>
 
       {/* drawing toolbar (ops only) */}
-      {role === 'ops' && (
+      {drawingSession && (
         <div className="absolute top-1/2 right-3 -translate-y-1/2 z-10 bg-white border border-black shadow-[4px_4px_0_#000] p-1 flex flex-col gap-0.5">
           <ToolBtn icon={MousePointer2} active={drawMode === 'select'} title="Select" onClick={() => setDrawMode('select')} />
           <ToolBtn icon={Hexagon} active={drawMode === 'polygon'} title="Polygon" onClick={() => setDrawMode('polygon')} />
@@ -658,7 +710,7 @@ export default function MapCanvas() {
       )}
 
       {/* coverage preview while drawing */}
-      {isDrawing && draftPolygon.length > 0 && (
+      {drawingSession && draftPolygon.length > 0 && (
         <div className="absolute bottom-28 left-1/2 -translate-x-1/2 z-10 w-[420px]">
           <CoveragePreview
             cells={drawCellCount}
@@ -673,12 +725,12 @@ export default function MapCanvas() {
       )}
 
       {/* finish polygon */}
-      {isDrawing && draftPolygon.length >= 3 && (
+      {drawingSession && draftPolygon.length >= 3 && (
         <button
           onClick={finishDraft}
           className="absolute top-3 right-16 z-10 bg-green-400 text-black px-3 py-2 text-[10px] font-black uppercase tracking-widest border border-black shadow-[3px_3px_0_#000]"
         >
-          Continue to declare →
+          Continue
         </button>
       )}
     </div>
@@ -695,13 +747,14 @@ function addIconMarker(
     icon: typeof Hospital;
     label: string;
     medium: boolean;
+    labels: boolean;
     popupStore: Popup[];
     onClick: () => void;
   }
 ) {
   const el = document.createElement('button');
   const zoomed = map.getZoom() >= POI_LABEL_ZOOM;
-  el.className = `qa-poi-marker qa-poi-${opts.tone}${zoomed ? '' : ' qa-poi-compact'}`;
+  el.className = `qa-poi-marker qa-poi-${opts.tone}${zoomed && opts.labels ? '' : ' qa-poi-compact'}`;
   el.type = 'button';
   el.setAttribute('aria-label', `${opts.label}: ${opts.title}`);
   el.innerHTML = `<span aria-hidden="true">${mapIconMarkup(opts.icon, 16)}</span><strong>${escapeHtml(opts.label)}</strong><em>${escapeHtml(opts.title)}</em>`;
@@ -761,12 +814,28 @@ function mapIconMarkup(Icon: typeof Hospital, size: number) {
   return renderToStaticMarkup(<Icon size={size} strokeWidth={3} />);
 }
 
-function LegendItem({ icon: Icon, label }: { icon: typeof MapPin; label: string }) {
+function FilterBtn({
+  icon: Icon,
+  label,
+  active,
+  onClick,
+}: {
+  icon: typeof MapPin;
+  label: string;
+  active: boolean;
+  onClick: () => void;
+}) {
   return (
-    <span className="flex items-center gap-1 text-[8px] font-black uppercase tracking-widest whitespace-nowrap">
+    <button
+      type="button"
+      onClick={onClick}
+      className={`flex items-center gap-1 px-1.5 py-1 border border-black text-[8px] font-black uppercase tracking-widest whitespace-nowrap ${
+        active ? 'bg-white text-black' : 'bg-gray-200 text-gray-500'
+      }`}
+    >
       <Icon className="w-3 h-3" />
       {label}
-    </span>
+    </button>
   );
 }
 

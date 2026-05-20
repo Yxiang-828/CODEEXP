@@ -8,6 +8,7 @@ import {
   SosLive,
   BriefingSpace,
   AlertsState,
+  CitizenAssistant,
 } from './CitizenWorkspaces';
 import {
   DutyStatus,
@@ -33,6 +34,8 @@ import {
   IncidentOps,
   ZoneManager,
   ReadinessReport,
+  ActivityLogWorkspace,
+  NotificationCenter,
 } from './OpsWorkspaces';
 import { GodModeWorkspace, MapLayersWorkspace } from './DemoWorkspaces';
 
@@ -44,6 +47,7 @@ const REGISTRY: Record<string, () => React.JSX.Element> = {
   sos_live: SosLive,
   briefing: BriefingSpace,
   alerts: AlertsState,
+  citizen_ai: CitizenAssistant,
   duty: DutyStatus,
   verify: VerifyQueue,
   form_case: FormCase,
@@ -65,6 +69,8 @@ const REGISTRY: Record<string, () => React.JSX.Element> = {
   source_health: SourceHealth,
   zones: ZoneManager,
   readiness: ReadinessReport,
+  activity_log: ActivityLogWorkspace,
+  notifications: NotificationCenter,
   god_mode: GodModeWorkspace,
   map_layers: MapLayersWorkspace,
   map_item: MapLayersWorkspace,

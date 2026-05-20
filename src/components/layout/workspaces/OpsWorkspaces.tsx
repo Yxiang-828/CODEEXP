@@ -1,12 +1,13 @@
 import { useState } from 'react';
 import type React from 'react';
-import { Megaphone, Eye, AlertOctagon, CheckCircle2, MapPinned, Archive, ClipboardCheck } from 'lucide-react';
+import { Megaphone, Eye, AlertOctagon, CheckCircle2, MapPinned, Archive, ClipboardCheck, ScrollText, Bell } from 'lucide-react';
 import { useAppContext } from '../../../AppContext';
+import type { CanonicalEvent, DistressSession, Responder } from '../../../AppContext';
 import SeverityChip from '../../primitives/SeverityChip';
 import RolePreviewTabs from '../../primitives/RolePreviewTabs';
 import CoveragePreview from '../../primitives/CoveragePreview';
 import type { SeverityLevel } from '../../primitives/SeverityChip';
-import { polygonCenter, radialPolygon } from '../../../utils/geo';
+import { getDistanceKm } from '../../../utils/geo';
 
 export function DeclareIncident() {
   const { declareIncident, setDrawerContent } = useAppContext();
@@ -75,7 +76,7 @@ export function DeclareIncident() {
       {step === 2 && (
         <div className="p-5 flex flex-col gap-3 flex-1">
           <h3 className="text-[10px] uppercase font-bold tracking-widest">Step 2 · Geometry</h3>
-          <Card>Polygon drawn on the map. Coverage preview below.</Card>
+          <Card>Use the temporary map drawing toolbar now. Undo and clear only affect this declaration session.</Card>
           <CoveragePreview
             cells={4}
             precision="gh5"
@@ -227,7 +228,7 @@ export function DispatchResponder() {
   const { responders, sosSessions, events, assignSos, assignIncident, setDrawerContent } = useAppContext();
   const pending = sosSessions.find((s) => s.status === 'requesting');
   const assignableEvents = events.filter((e) => e.status === 'verified' && e.kind !== 'weather');
-  const available = responders.filter((r) => r.status === 'ready');
+  const available = responders.filter((r) => ['ready', 'en_route', 'on_scene'].includes(r.status));
   const [target, setTarget] = useState(pending ? `sos:${pending.id}` : assignableEvents[0] ? `event:${assignableEvents[0].id}` : '');
   const selectedSos = target.startsWith('sos:') ? sosSessions.find((s) => s.id === target.slice(4)) : null;
   const selectedEvent = target.startsWith('event:') ? events.find((e) => e.id === target.slice(6)) : null;
@@ -257,32 +258,38 @@ export function DispatchResponder() {
               ))}
             </select>
           </Card>
-          <h3 className="text-[10px] uppercase font-bold tracking-widest">Available roster</h3>
-          {available.map((r) => (
+          <h3 className="text-[10px] uppercase font-bold tracking-widest">Available roster · demo fit scoring</h3>
+          {available.map((r) => {
+            const fit = fitForDispatch(r, selectedSos, selectedEvent);
+            return (
             <div
               key={r.id}
-              className="flex items-center justify-between p-2 border border-border-strong bg-surface-0 shadow-[2px_2px_0_rgba(26,26,26,1)]"
+              className="p-2 border border-border-strong bg-surface-0 shadow-[2px_2px_0_rgba(26,26,26,1)]"
             >
-              <div>
-                <div className="text-[10px] font-bold uppercase tracking-widest">
-                  {r.name} · {r.org}
+              <div className="flex items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="text-[10px] font-bold uppercase tracking-widest">
+                    {r.name} · {r.org}
+                  </div>
+                  <div className="text-[9px] uppercase tracking-widest text-text-secondary">
+                    {r.role} · {r.status} {r.demo ? '· demo' : ''} {r.unitType === 'professional' ? '· professional' : ''}
+                  </div>
                 </div>
-                <div className="text-[9px] uppercase tracking-widest text-text-secondary">
-                  {r.role} · {r.status}
-                </div>
+                <button
+                  onClick={() => {
+                    if (selectedSos) assignSos(selectedSos.id, r.id);
+                    if (selectedEvent) assignIncident(selectedEvent.id, r.id);
+                    setDrawerContent(null);
+                  }}
+                  className="bg-surface-3 text-text-inverse px-3 py-1 text-[9px] font-bold uppercase tracking-widest border border-border-strong shadow-[2px_2px_0_rgba(26,26,26,1)]"
+                >
+                  Assign
+                </button>
               </div>
-              <button
-                onClick={() => {
-                  if (selectedSos) assignSos(selectedSos.id, r.id);
-                  if (selectedEvent) assignIncident(selectedEvent.id, r.id);
-                  setDrawerContent(null);
-                }}
-                className="bg-surface-3 text-text-inverse px-3 py-1 text-[9px] font-bold uppercase tracking-widest border border-border-strong shadow-[2px_2px_0_rgba(26,26,26,1)]"
-              >
-                Assign
-              </button>
+              <FitMeter score={fit.score} reason={fit.reason} />
             </div>
-          ))}
+            );
+          })}
         </>
       ) : (
         <Card>No SOS or incident target is waiting for dispatch.</Card>
@@ -337,6 +344,12 @@ export function ReportQueue() {
           {queue.length} pending · {reports.filter((r) => r.status === 'verified').length} verified
         </p>
       </div>
+      <div className="p-3 border-b border-border-strong bg-surface-2">
+        <div className="text-[9px] uppercase font-black tracking-widest">Feature chain</div>
+        <p className="text-[10px] leading-relaxed mt-1">
+          Citizen report to ops claim to ops verify/dismiss to reporter notification. Only verified incidents publish to responders.
+        </p>
+      </div>
       <div className="flex-1 overflow-y-auto">
         {queue.map((r) => (
           <div key={r.id} className="p-3 border-b border-border-strong">
@@ -368,7 +381,7 @@ export function ReportQueue() {
                 className="flex-1 bg-accent-success text-surface-3 py-1.5 text-[9px] uppercase font-bold tracking-widest border border-border-strong shadow-[2px_2px_0_rgba(26,26,26,1)]"
               >
                 <CheckCircle2 className="w-3 h-3 inline mr-1" />
-                Verify
+                Verify + notify
               </button>
               <button
                 onClick={() => dismissReport(r.id)}
@@ -377,6 +390,16 @@ export function ReportQueue() {
                 Dismiss
               </button>
             </div>
+            {r.auditTrail && (
+              <div className="mt-2 border border-border-strong bg-surface-2 p-2">
+                <div className="text-[9px] uppercase font-black tracking-widest">Audit trail</div>
+                {r.auditTrail.map((line) => (
+                  <div key={line} className="text-[9px] uppercase tracking-widest text-text-secondary mt-1">
+                    {line}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         ))}
       </div>
@@ -385,19 +408,7 @@ export function ReportQueue() {
 }
 
 export function ZoneManager() {
-  const { zones, updateZoneStatus, declareZone } = useAppContext();
-  const createZone = () => {
-    const area = radialPolygon({ lng: 103.85, lat: 1.3 }, 0.35, 8);
-    declareZone({
-      title: 'New drawn operating zone',
-      kind: 'hazard',
-      severity: 2,
-      description: 'Shell-created zone. Backend map drawing will provide exact geometry.',
-      center: polygonCenter(area),
-      area,
-      declaredBy: 'ops',
-    });
-  };
+  const { zones, updateZoneStatus } = useAppContext();
   return (
     <div className="flex flex-col h-full">
       <div className="p-4 border-b border-border-strong">
@@ -409,13 +420,8 @@ export function ZoneManager() {
           {zones.length} zones · drawn-area shell ready
         </p>
       </div>
-      <div className="p-3 border-b border-border-strong">
-        <button
-          onClick={createZone}
-          className="w-full bg-surface-3 text-text-inverse py-3 text-[10px] uppercase font-bold tracking-widest border border-border-strong shadow-[3px_3px_0_rgba(26,26,26,1)]"
-        >
-          Create demo drawn zone
-        </button>
+      <div className="p-3 border-b border-border-strong text-[10px] uppercase font-bold tracking-widest text-text-secondary">
+        New zones are created through the ops Declare/Broadcast drawing session only.
       </div>
       <div className="flex-1 overflow-y-auto">
         {zones.map((z) => (
@@ -489,6 +495,24 @@ export function DistressOversight() {
                   Dispatch now
                 </button>
               )}
+              <div className="mt-2 border border-border-strong bg-surface-2 p-2">
+                <div className="text-[9px] uppercase font-black tracking-widest mb-1">
+                  Suggested responder fit
+                </div>
+                {responders
+                  .filter((candidate) => candidate.status === 'ready')
+                  .map((candidate) => ({ candidate, fit: fitForDispatch(candidate, s, null) }))
+                  .sort((a, b) => b.fit.score - a.fit.score)
+                  .slice(0, 4)
+                  .map(({ candidate, fit }) => (
+                    <div key={candidate.id} className="flex items-center gap-2 py-1 border-t border-border-strong first:border-t-0">
+                      <span className="font-mono text-[10px] font-black w-9">{fit.score}%</span>
+                      <span className="text-[9px] uppercase font-bold tracking-widest flex-1">
+                        {candidate.name} · {candidate.org}
+                      </span>
+                    </div>
+                  ))}
+              </div>
             </div>
           );
         })}
@@ -498,7 +522,9 @@ export function DistressOversight() {
 }
 
 export function CaseOversight() {
-  const { cases, setDrawerContent, setActiveCaseId } = useAppContext();
+  const { cases, setDrawerContent, setActiveCaseId, closeCase } = useAppContext();
+  const [finalReports, setFinalReports] = useState<Record<string, string>>({});
+  const [confirmClose, setConfirmClose] = useState<string | null>(null);
   return (
     <div className="flex flex-col h-full">
       <div className="p-4 border-b border-border-strong">
@@ -506,23 +532,62 @@ export function CaseOversight() {
       </div>
       <div className="flex-1 overflow-y-auto">
         {cases.map((c) => (
-          <button
-            key={c.id}
-            onClick={() => {
-              setActiveCaseId(c.id);
-              setDrawerContent('case_lobby');
-            }}
-            className="w-full p-3 border-b border-border-strong text-left hover:bg-surface-2 flex items-center gap-3"
-          >
-            <SeverityChip level={c.severity} />
-            <div className="flex-1">
-              <div className="text-[11px] font-bold uppercase tracking-widest">{c.name}</div>
-              <div className="text-[9px] uppercase tracking-widest text-text-secondary">
-                {c.state} · {c.members.length} members
+          <div key={c.id} className="p-3 border-b border-border-strong">
+            <button
+              onClick={() => {
+                setActiveCaseId(c.id);
+                setDrawerContent('case_lobby');
+              }}
+              className="w-full text-left hover:bg-surface-2 flex items-center gap-3"
+            >
+              <SeverityChip level={c.severity} />
+              <div className="flex-1">
+                <div className="text-[11px] font-bold uppercase tracking-widest">
+                  {c.name} {c.restricted ? '· official-only' : ''}
+                </div>
+                <div className="text-[9px] uppercase tracking-widest text-text-secondary">
+                  {c.state} · {c.members.length} members · {c.source ?? 'ops'}
+                </div>
               </div>
-            </div>
-            <Eye className="w-3 h-3" />
-          </button>
+              <Eye className="w-3 h-3" />
+            </button>
+            {c.state !== 'resolved' && (
+              <div className="mt-2 flex flex-col gap-2">
+                <textarea
+                  value={finalReports[c.id] ?? ''}
+                  onChange={(e) => setFinalReports((prev) => ({ ...prev, [c.id]: e.target.value }))}
+                  className="w-full h-16 p-2 border border-border-strong bg-surface-0 text-[10px] font-mono resize-none outline-none"
+                  placeholder="Final report before ops close"
+                />
+                {confirmClose === c.id ? (
+                  <div className="flex gap-1">
+                    <button
+                      onClick={() => {
+                        closeCase(c.id, finalReports[c.id] ?? '');
+                        setConfirmClose(null);
+                      }}
+                      className="flex-1 bg-accent-critical text-text-inverse py-2 text-[9px] uppercase font-bold tracking-widest border border-border-strong shadow-[2px_2px_0_rgba(26,26,26,1)]"
+                    >
+                      Confirm close
+                    </button>
+                    <button
+                      onClick={() => setConfirmClose(null)}
+                      className="flex-1 bg-surface-0 py-2 text-[9px] uppercase font-bold tracking-widest border border-border-strong"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => setConfirmClose(c.id)}
+                    className="w-full bg-accent-success text-surface-3 py-2 text-[9px] uppercase font-bold tracking-widest border border-border-strong shadow-[2px_2px_0_rgba(26,26,26,1)]"
+                  >
+                    Ops close case
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
         ))}
       </div>
     </div>
@@ -558,11 +623,12 @@ export function ResponderOversight() {
                 {r.name} · {r.org}
               </div>
               <div className="text-[9px] uppercase tracking-widest text-text-secondary">
-                {r.role} · {r.status}
+                {r.role} · {r.status} {r.demo ? '· demo' : ''} {r.unitType === 'professional' ? '· special professional' : ''}
               </div>
               <div className="text-[9px] uppercase tracking-widest text-text-secondary">
                 {users.find((u) => u.id === r.id)?.skills.join(' · ') || 'profile pending'}
               </div>
+              {r.note && <div className="text-[10px] leading-relaxed mt-1">{r.note}</div>}
             </div>
             <select
               value={r.status}
@@ -622,6 +688,87 @@ export function SourceHealth() {
   );
 }
 
+export function NotificationCenter() {
+  const { notifications, role, ackNotification, selfResponderId } = useAppContext();
+  const actorId = role === 'responder' ? selfResponderId : role === 'citizen' ? 'U-CIV-1' : 'U-OPS-1';
+  const visible = notifications.filter((n) => n.roles.includes(role));
+  return (
+    <div className="flex flex-col h-full">
+      <div className="p-4 border-b border-border-strong">
+        <h2 className="text-xl font-serif italic font-black flex items-center gap-2">
+          <Bell className="w-4 h-4" />
+          Notifications
+        </h2>
+        <p className="text-[10px] uppercase font-bold tracking-widest text-text-secondary">
+          Tiered by severity and role
+        </p>
+      </div>
+      <div className="flex-1 overflow-y-auto">
+        {visible.map((n) => {
+          const acked = n.ackBy.includes(actorId);
+          return (
+            <div key={n.id} className="p-3 border-b border-border-strong">
+              <div className="flex items-center gap-2">
+                <span className={`px-1.5 py-0.5 border border-border-strong text-[8px] uppercase font-black tracking-widest ${tierClass(n.tier)}`}>
+                  {n.tier}
+                </span>
+                <span className="text-[10px] uppercase font-bold tracking-widest">{n.title}</span>
+              </div>
+              <p className="text-[10px] leading-relaxed mt-2">{n.body}</p>
+              <button
+                onClick={() => ackNotification(n.id, actorId)}
+                disabled={acked}
+                className={`mt-2 w-full py-2 text-[9px] uppercase font-bold tracking-widest border border-border-strong ${
+                  acked ? 'bg-surface-2 text-text-muted' : 'bg-surface-3 text-text-inverse shadow-[2px_2px_0_rgba(26,26,26,1)]'
+                }`}
+              >
+                {acked ? 'Acknowledged' : 'Acknowledge'}
+              </button>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+export function ActivityLogWorkspace() {
+  const { actionLogs, role } = useAppContext();
+  const visible = actionLogs.filter((log) => log.visibleTo.includes(role));
+  return (
+    <div className="flex flex-col h-full">
+      <div className="p-4 border-b border-border-strong">
+        <h2 className="text-xl font-serif italic font-black flex items-center gap-2">
+          <ScrollText className="w-4 h-4" />
+          Activity logs
+        </h2>
+        <p className="text-[10px] uppercase font-bold tracking-widest text-text-secondary">
+          Ops sees ops + responder logs. Responders see responder-visible logs.
+        </p>
+      </div>
+      <div className="flex-1 overflow-y-auto">
+        {visible.map((log) => (
+          <div key={log.id} className="p-3 border-b border-border-strong">
+            <div className="flex items-center gap-2 flex-wrap">
+              {log.severity && <SeverityChip level={log.severity} />}
+              <span className="text-[9px] uppercase font-mono font-bold border border-border-strong px-1.5 bg-surface-2">
+                {log.action}
+              </span>
+              <span className="text-[9px] uppercase tracking-widest text-text-secondary">
+                {new Date(log.createdAt).toLocaleTimeString('en-SG', { hour: '2-digit', minute: '2-digit' })}
+              </span>
+            </div>
+            <p className="text-[10px] leading-relaxed mt-2">{log.message}</p>
+            <div className="text-[9px] uppercase tracking-widest text-text-secondary mt-1">
+              actor {log.actorId} · target {log.targetId}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function ReadinessReport() {
   const items = [
     {
@@ -642,7 +789,7 @@ export function ReadinessReport() {
     {
       state: 'ready',
       title: 'Responder shell',
-      detail: 'Duty, verify queue, assignment detail, case room, groups, volunteer events, and profile are reachable.',
+      detail: 'Duty, joinable missions, assignment detail, case room, groups, volunteer events, logs, and profile are reachable.',
     },
     {
       state: 'ready',
@@ -665,9 +812,9 @@ export function ReadinessReport() {
       detail: 'Voice transcripts and photo evidence markers are usable shell data. Backend media storage is the next integration layer.',
     },
     {
-      state: 'not_configured',
+      state: 'ready',
       title: 'OpenRouter Host AI',
-      detail: 'Host remains command-shaped shell logic until OPENROUTER_API_KEY and backend route exist.',
+      detail: 'Backend route /api/host/ask is wired. It returns not configured instead of fake AI when the environment key is missing.',
     },
     {
       state: 'not_configured',
@@ -734,4 +881,49 @@ function Card({ children }: { children: React.ReactNode }) {
       {children}
     </div>
   );
+}
+
+function FitMeter({ score, reason }: { score: number; reason: string }) {
+  return (
+    <div className="mt-2 border border-border-strong bg-surface-2 p-2">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[9px] uppercase font-black tracking-widest">Fit</span>
+        <span className="font-mono text-[11px] font-black">{score}%</span>
+      </div>
+      <div className="mt-1 h-2 border border-border-strong bg-surface-0">
+        <div className="h-full bg-accent-success" style={{ width: `${Math.max(0, Math.min(100, score))}%` }} />
+      </div>
+      <p className="text-[9px] uppercase tracking-widest text-text-secondary mt-1">{reason}</p>
+    </div>
+  );
+}
+
+function fitForDispatch(
+  responder: Responder,
+  sos: DistressSession | null | undefined,
+  event: CanonicalEvent | null | undefined
+) {
+  const target = sos?.location ?? event?.location ?? { lng: 103.85, lat: 1.3 };
+  const distanceKm = getDistanceKm(responder.location, target);
+  const incidentKind = sos?.category ?? event?.kind ?? 'other';
+  const capability =
+    (incidentKind === 'medical' && responder.role === 'medic') ||
+    (incidentKind === 'fire' && responder.role === 'fire') ||
+    (incidentKind === 'trapped' && responder.role === 'search') ||
+    (incidentKind === 'crash' && responder.role !== 'aux') ||
+    (incidentKind === 'flood' && ['search', 'aux'].includes(responder.role));
+  const readiness = responder.status === 'ready' ? 18 : responder.status === 'en_route' ? 6 : 0;
+  const professional = responder.unitType === 'professional' ? 8 : 0;
+  const score = Math.min(99, 36 + (capability ? 24 : 8) + readiness + professional + Math.max(0, 22 - Math.round(distanceKm * 3)));
+  return {
+    score,
+    reason: `${capability ? 'capability match' : 'support fit'} · ${distanceKm.toFixed(1)} km · ${responder.unitType ?? 'volunteer'}`,
+  };
+}
+
+function tierClass(tier: string) {
+  if (tier === 'critical') return 'bg-accent-critical text-text-inverse';
+  if (tier === 'urgent') return 'bg-accent-warning text-text-primary';
+  if (tier === 'watch') return 'bg-accent-info text-text-inverse';
+  return 'bg-surface-2 text-text-primary';
 }
