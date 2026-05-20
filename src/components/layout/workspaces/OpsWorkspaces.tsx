@@ -56,6 +56,115 @@ export function ReportQueue() {
   return <OpsGenericList title="Incoming Reports" items={items} />;
 }
 
+// CaseRequests — actionable queue for responder-initiated case formation
+// requests. Backs the "Requests" entry in the ops left rail. Ops can either
+// form the case (which assigns the requesting responder as captain) or
+// decline with an optional reason.
+export function CaseRequests() {
+  const { events, responders, acceptCaseFormation, declineCaseFormation } = useAppContext();
+  const requests = events.filter((e) => !!e.caseRequestedBy && !e.caseId);
+  const [declineFor, setDeclineFor] = useState<string | null>(null);
+  const [reason, setReason] = useState('');
+
+  return (
+    <div className="flex flex-col h-full bg-surface-0">
+      <div className="p-6 border-b border-border-strong bg-surface-3 text-text-inverse">
+        <h2 className="text-sm font-black uppercase tracking-widest">Case Requests</h2>
+        <p className="text-[10px] uppercase tracking-widest opacity-80 mt-1">
+          {requests.length} pending · raised by responders on verified incidents
+        </p>
+      </div>
+      <div className="flex-1 overflow-y-auto p-6 flex flex-col gap-4">
+        {requests.length === 0 && (
+          <div className="border border-dashed border-border-strong p-4 text-[10px] uppercase font-bold tracking-widest text-text-secondary">
+            No pending case requests. Responders raise these from the "Form case" drawer.
+          </div>
+        )}
+        {requests.map((event) => {
+          const requester = responders.find((r) => r.id === event.caseRequestedBy);
+          const ageMin = event.caseRequestedAt
+            ? Math.max(0, Math.round((Date.now() - event.caseRequestedAt) / 60_000))
+            : 0;
+          return (
+            <div
+              key={event.id}
+              className="border border-border-strong p-4 bg-surface-0 shadow-[4px_4px_0_rgba(26,26,26,1)]"
+            >
+              <div className="flex justify-between items-start gap-2 mb-2 border-b border-border-strong pb-2">
+                <div className="min-w-0 flex-1">
+                  <h4 className="text-[10px] font-black uppercase tracking-widest text-text-primary truncate">
+                    {event.title}
+                  </h4>
+                  <p className="text-[9px] uppercase tracking-widest text-text-secondary mt-0.5">
+                    L{event.severity} · {event.kind} · {event.id}
+                  </p>
+                </div>
+                <span className="text-[9px] font-mono font-bold opacity-70 uppercase shrink-0">
+                  {ageMin}m ago
+                </span>
+              </div>
+              <p className="text-[11px] text-text-secondary leading-relaxed mt-2">
+                Requested by <strong className="text-text-primary">{requester?.name ?? event.caseRequestedBy}</strong>
+                {requester ? ` (${requester.org} · ${requester.role})` : ''}. Forming the case will
+                assign them as captain and open a case room.
+              </p>
+
+              {declineFor === event.id ? (
+                <div className="mt-3 flex flex-col gap-2">
+                  <input
+                    type="text"
+                    autoFocus
+                    value={reason}
+                    onChange={(e) => setReason(e.target.value)}
+                    placeholder="Reason (optional)"
+                    className="w-full border border-border-strong bg-surface-0 px-2 py-1.5 text-[10px] uppercase font-bold tracking-widest"
+                  />
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => {
+                        declineCaseFormation(event.id, reason || undefined);
+                        setDeclineFor(null);
+                        setReason('');
+                      }}
+                      className="flex-1 bg-accent-critical text-text-inverse py-2 text-[9px] uppercase font-black tracking-widest border border-border-strong shadow-[2px_2px_0_rgba(26,26,26,1)]"
+                    >
+                      Confirm decline
+                    </button>
+                    <button
+                      onClick={() => {
+                        setDeclineFor(null);
+                        setReason('');
+                      }}
+                      className="px-3 py-2 text-[9px] uppercase font-black tracking-widest border border-border-strong bg-surface-0"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="mt-3 grid grid-cols-2 gap-2">
+                  <button
+                    onClick={() => acceptCaseFormation(event.id)}
+                    className="bg-accent-success text-surface-3 py-2 text-[9px] uppercase font-black tracking-widest border border-border-strong shadow-[2px_2px_0_rgba(26,26,26,1)]"
+                  >
+                    Form case
+                  </button>
+                  <button
+                    onClick={() => setDeclineFor(event.id)}
+                    className="bg-surface-0 text-text-primary py-2 text-[9px] uppercase font-black tracking-widest border border-border-strong shadow-[2px_2px_0_rgba(26,26,26,1)]"
+                  >
+                    Decline
+                  </button>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export function DistressOversight() {
   const { sosSessions } = useAppContext();
   const active = sosSessions.filter((s) => !['resolved', 'cancelled'].includes(s.status));

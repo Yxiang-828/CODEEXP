@@ -12,6 +12,7 @@ const DRAWER_TITLES: Record<string, string> = {
   case_lobby: 'Case room',
   form_case: 'Form case',
   report_queue: 'Report queue',
+  case_requests: 'Case requests',
   zones: 'Emergency zones',
   distress_oversight: 'Dispatch status',
   case_oversight: 'Ongoing missions',

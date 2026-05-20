@@ -76,6 +76,11 @@ export interface CanonicalEvent {
   createdAt: number;
   caseId?: string;
   liveValue?: string;
+  // Responder-initiated case-formation request. Set when a responder taps
+  // "Request ops case" on the verified event; cleared when ops accepts
+  // (case created via assignIncident) or declines.
+  caseRequestedBy?: string;
+  caseRequestedAt?: number;
 }
 
 export interface EmergencyZone {

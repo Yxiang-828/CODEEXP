@@ -170,9 +170,37 @@ function CsotTab() {
 }
 
 function SeedTab() {
-  const { godSeedScenario, godResetCsot, startSos, selfLocation } = useAppContext();
+  const { godSeedScenario, godResetCsot, godSeedRoster, godClearRoster, responders, startSos, selfLocation } = useAppContext();
+  const demoRosterCount = responders.filter((r) => r.id.startsWith('R-DEMO-')).length;
   return (
     <div className="flex flex-col gap-2">
+      <button
+        type="button"
+        onClick={() => godSeedRoster()}
+        className="border border-border-strong bg-surface-0 p-3 text-left shadow-[2px_2px_0_rgba(26,26,26,1)] hover:bg-surface-2"
+      >
+        <div className="text-[10px] font-black uppercase tracking-widest flex items-center gap-1">
+          <Sparkles className="w-3 h-3" /> Seed responder roster
+        </div>
+        <div className="text-[10px] text-text-secondary mt-1">
+          12 demo responders across SCDF (4) · SPF (2) · Medic (2) · Volunteer (4). Auto-fills group rosters.
+          {demoRosterCount > 0 && (
+            <span className="block mt-1 font-mono font-bold text-text-primary">
+              Currently seeded: {demoRosterCount}
+            </span>
+          )}
+        </div>
+      </button>
+      <button
+        type="button"
+        onClick={() => godClearRoster()}
+        disabled={demoRosterCount === 0}
+        className="border border-border-strong bg-surface-2 text-text-primary p-3 text-left shadow-[2px_2px_0_rgba(26,26,26,1)] disabled:opacity-50"
+      >
+        <div className="text-[10px] font-black uppercase tracking-widest">Clear demo roster</div>
+        <div className="text-[10px] text-text-secondary mt-1">Removes R-DEMO-* responders. Keeps the self responder.</div>
+      </button>
+      <div className="border-t border-border-strong my-1" />
       <button
         type="button"
         onClick={() => godSeedScenario('minor')}
