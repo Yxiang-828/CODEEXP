@@ -133,8 +133,17 @@ async function fetchDataMallLayers(now) {
 
   if (speedResponse.ok) {
     const data = await speedResponse.json();
-    speedBands.push(...(Array.isArray(data?.value) ? data.value : []).map(toSpeedBand).filter(Boolean));
-    sources.push(source('DataMall TrafficSpeedBands', 'fresh', `${speedBands.length} speed-band rows returned.`));
+    const raw = (Array.isArray(data?.value) ? data.value : []).map(toSpeedBand).filter(Boolean);
+    // One marker per unique road — keep the most critical segment to avoid stacking
+    const byRoad = new Map();
+    for (const sb of raw) {
+      const existing = byRoad.get(sb.name);
+      if (!existing || (sb.tone === 'critical' && existing.tone !== 'critical') || (sb.tone === 'warning' && existing.tone === 'ok')) {
+        byRoad.set(sb.name, sb);
+      }
+    }
+    speedBands.push(...byRoad.values());
+    sources.push(source('DataMall TrafficSpeedBands', 'fresh', `${raw.length} segments → ${speedBands.length} unique roads island-wide.`));
   } else {
     sources.push(source('DataMall TrafficSpeedBands', 'down', await shortText(speedResponse)));
   }
