@@ -553,33 +553,124 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
-  const askHost: AppState['askHost'] = (caseId, query) => {
+  const aiRequestCount = useRef(0);
+  const [aiRateWarned, setAiRateWarned] = useState(false);
+
+  const fallbackHost = useCallback((caseId: string, query: string): { text: string; chips: ChatEntry['chips'] } => {
     const q = query.toLowerCase();
-    let text = 'Try /host help for commands.';
-    let chips: ChatEntry['chips'] = [];
     if (q.includes('status')) {
-      text = 'Case ALPHA-09 · active 1h · 2 responders on scene · no new SOS pings within 200 m.';
-      chips = [{ label: 'tool: case_state', ref: 'active' }, { label: 'tool: roster', ref: '2/4' }];
-    } else if (q.includes('aed') || q.includes('nearest')) {
-      text = 'Nearest AED: Blk 219 Bedok North St 1 · 220 m · load OK.';
-      chips = [{ label: 'tool: resource_lookup', ref: 'AED 220m' }, { label: 'tool: route', ref: '4min' }];
-    } else if (q.includes('hospital')) {
-      text = 'CGH 71% · SGH 84% · KTPH 62%. Recommend KTPH for handoff.';
-      chips = [{ label: 'tool: hospital_load', ref: 'live' }];
-    } else if (q.includes('weather') || q.includes('psi')) {
-      const psi = liveSnapshot?.psi[0];
-      text = psi
-        ? `PSI national ${psi.psi24h}. Air quality ${(psi.psi24h ?? 0) < 55 ? 'good' : 'unhealthy'}. Source NEA live.`
-        : 'NEA live not yet fetched.';
-      chips = [{ label: 'tool: nea_psi', ref: psi ? 'live' : 'pending' }];
-    } else if (q.includes('escalate')) {
-      text = 'Escalation NOT recommended. Casualties stable.';
-      chips = [{ label: 'tool: case_state', ref: 'active' }];
-    } else if (q.includes('help')) {
-      text = 'Available: /host status · /host nearest aed · /host hospital load · /host weather · /host escalate?';
+      return {
+        text: 'Case ALPHA-09 · active 1h · 2 responders on scene · no new SOS pings within 200 m.',
+        chips: [{ label: 'tool: case_state', ref: 'active' }, { label: 'tool: roster', ref: '2/4' }],
+      };
     }
-    const id = newId('CH');
-    setChat((prev) => [...prev, { id, caseId, authorId: 'host', kind: 'host', text, chips, ts: Date.now() }]);
+    if (q.includes('aed') || q.includes('nearest')) {
+      return {
+        text: 'Nearest AED: Blk 219 Bedok North St 1 · 220 m · load OK.',
+        chips: [{ label: 'tool: resource_lookup', ref: 'AED 220m' }, { label: 'tool: route', ref: '4min' }],
+      };
+    }
+    if (q.includes('hospital')) {
+      return {
+        text: 'CGH 71% · SGH 84% · KTPH 62%. Recommend KTPH for handoff.',
+        chips: [{ label: 'tool: hospital_load', ref: 'live' }],
+      };
+    }
+    if (q.includes('weather') || q.includes('psi')) {
+      const psi = liveSnapshot?.psi[0];
+      return {
+        text: psi
+          ? `PSI national ${psi.psi24h}. Air quality ${(psi.psi24h ?? 0) < 55 ? 'good' : 'unhealthy'}. Source NEA live.`
+          : 'NEA live not yet fetched.',
+        chips: [{ label: 'tool: nea_psi', ref: psi ? 'live' : 'pending' }],
+      };
+    }
+    if (q.includes('escalate')) {
+      return {
+        text: 'Escalation NOT recommended. Casualties stable.',
+        chips: [{ label: 'tool: case_state', ref: 'active' }],
+      };
+    }
+    return {
+      text: 'Available: /host status · /host nearest aed · /host hospital load · /host weather · /host escalate?',
+      chips: [],
+    };
+  }, [liveSnapshot]);
+
+  const askHost: AppState['askHost'] = async (caseId, query) => {
+    const key = import.meta.env.VITE_OPENROUTER_API_KEY;
+    const model = import.meta.env.VITE_AI_MODEL || 'meta-llama/llama-3.3-70b-instruct:free';
+
+    aiRequestCount.current += 1;
+    const count = aiRequestCount.current;
+
+    // Rate-limit warning
+    if (count === 20 && !aiRateWarned) {
+      setAiRateWarned(true);
+      const warnId = newId('CH');
+      setChat((prev) => [
+        ...prev,
+        {
+          id: warnId,
+          caseId,
+          authorId: 'host',
+          kind: 'host',
+          text: `⚠ Rate-limit check: ${count} AI requests this session. Model has 648M weekly tokens free. If you hit a limit, responses will fallback to local mode.`,
+          chips: [{ label: 'tool: rate_limit', ref: 'warn' }],
+          ts: Date.now(),
+        },
+      ]);
+    }
+
+    const caseRoom = cases.find((c) => c.id === caseId);
+    const systemPrompt = `You are the AI Host for Quick Aid SG, an emergency-response coordination app. You are embedded in a case-room chat for responders and ops. Be concise (max 2 sentences), factual, and helpful. Current case: ${caseRoom?.name ?? 'Unknown'} · severity L${caseRoom?.severity ?? '?'} · state: ${caseRoom?.state ?? 'unknown'}. Available tools: case_state, roster, resource_lookup, hospital_load, nea_psi. If asked about something unrelated, suggest /host help.`;
+
+    const push = (text: string, chips: ChatEntry['chips'] = []) => {
+      const id = newId('CH');
+      setChat((prev) => [...prev, { id, caseId, authorId: 'host', kind: 'host', text, chips, ts: Date.now() }]);
+    };
+
+    if (!key) {
+      const fb = fallbackHost(caseId, query);
+      push(fb.text + '\n\n[AI key missing — using local fallback]', fb.chips);
+      return;
+    }
+
+    try {
+      const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${key}`,
+          'Content-Type': 'application/json',
+          'HTTP-Referer': window.location.origin,
+          'X-Title': 'Quick Aid SG',
+        },
+        body: JSON.stringify({
+          model,
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: query },
+          ],
+          max_tokens: 256,
+          temperature: 0.4,
+        }),
+      });
+
+      if (!res.ok) {
+        const body = await res.text().catch(() => '');
+        const fb = fallbackHost(caseId, query);
+        push(fb.text + `\n\n[OpenRouter error ${res.status}: ${body.slice(0, 80)} — using local fallback]`, fb.chips);
+        return;
+      }
+
+      const data = await res.json();
+      const text = data.choices?.[0]?.message?.content?.trim();
+      if (!text) throw new Error('Empty response');
+      push(text, [{ label: 'tool: openrouter', ref: model }]);
+    } catch (err) {
+      const fb = fallbackHost(caseId, query);
+      push(fb.text + '\n\n[Network error — using local fallback]', fb.chips);
+    }
   };
 
   const joinGroup: AppState['joinGroup'] = (groupId, responderId) => {
