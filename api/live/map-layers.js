@@ -117,7 +117,7 @@ async function fetchDataMallLayers(now) {
   const base = 'https://datamall2.mytransport.sg/ltaodataservice';
   const [incidentResponse, speedResponse] = await Promise.all([
     fetch(`${base}/TrafficIncidents`, { headers }),
-    fetch(`${base}/v4/TrafficSpeedBands?$top=80`, { headers }),
+    fetch(`${base}/v4/TrafficSpeedBands`, { headers }),
   ]);
   const sources = [];
   const traffic = [];
@@ -133,8 +133,19 @@ async function fetchDataMallLayers(now) {
 
   if (speedResponse.ok) {
     const data = await speedResponse.json();
-    speedBands.push(...(Array.isArray(data?.value) ? data.value : []).map(toSpeedBand).filter(Boolean).slice(0, 80));
-    sources.push(source('DataMall TrafficSpeedBands', 'fresh', `${speedBands.length} speed-band rows returned; capped at 80.`));
+    const raw = (Array.isArray(data?.value) ? data.value : []).map(toSpeedBand).filter(Boolean);
+    // Deduplicate by road name + spatially bin so markers spread across the island
+    const seenRoads = new Set();
+    const binned = [];
+    for (const sb of raw) {
+      const key = `${sb.name}|${Math.round(sb.lng * 10)},${Math.round(sb.lat * 10)}`;
+      if (seenRoads.has(key)) continue;
+      seenRoads.add(key);
+      binned.push(sb);
+    }
+    // Cap at 200 but pick a spatially diverse subset if we exceed it
+    speedBands.push(...(binned.length > 200 ? spatialSampleSpeedBands(binned, 200) : binned));
+    sources.push(source('DataMall TrafficSpeedBands', 'fresh', `${raw.length} raw rows; ${speedBands.length} unique roads shown after dedup + spatial sampling.`));
   } else {
     sources.push(source('DataMall TrafficSpeedBands', 'down', await shortText(speedResponse)));
   }
@@ -153,6 +164,22 @@ function guardProvider(provider, now, reason) {
   }
   hits.push({ at: now, reason });
   quota[provider] = hits;
+}
+
+function spatialSampleSpeedBands(items, maxTotal) {
+  const BINS = 8; // 8x8 grid across Singapore
+  const lngMin = 103.60, lngMax = 104.07;
+  const latMin = 1.20, latMax = 1.48;
+  const buckets = Array.from({ length: BINS * BINS }, () => []);
+  for (const item of items) {
+    const lngBin = Math.min(BINS - 1, Math.floor((item.lng - lngMin) / (lngMax - lngMin) * BINS));
+    const latBin = Math.min(BINS - 1, Math.floor((item.lat - latMin) / (latMax - latMin) * BINS));
+    buckets[latBin * BINS + lngBin].push(item);
+  }
+  const perBin = Math.ceil(maxTotal / buckets.length);
+  const result = [];
+  for (const bucket of buckets) result.push(...bucket.slice(0, perBin));
+  return result.slice(0, maxTotal);
 }
 
 function spatialSample(rows, maxTotal) {
