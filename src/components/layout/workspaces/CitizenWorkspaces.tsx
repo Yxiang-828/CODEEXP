@@ -47,7 +47,12 @@ export function LocalAlertDetail() {
         >
           What should I do?
         </button>
-        <button className="w-full bg-surface-0 text-text-primary py-3 text-[10px] uppercase font-bold tracking-widest border border-border-strong shadow-[2px_2px_0_rgba(26,26,26,1)]">
+        <button
+          onClick={() => {
+            navigator.clipboard?.writeText(window.location.href).catch(() => {});
+          }}
+          className="w-full bg-surface-0 text-text-primary py-3 text-[10px] uppercase font-bold tracking-widest border border-border-strong shadow-[2px_2px_0_rgba(26,26,26,1)] hover:bg-surface-2 transition-all"
+        >
           Share with a friend
         </button>
       </div>
@@ -57,7 +62,7 @@ export function LocalAlertDetail() {
 }
 
 export function IncidentGuidance() {
-  const { setDrawerContent } = useAppContext();
+  const { setDrawerContent, markSafe } = useAppContext();
   return (
     <div className="flex flex-col h-full">
       <div className="flex border-b border-border-strong">
@@ -80,8 +85,11 @@ export function IncidentGuidance() {
       </div>
       <div className="p-4 border-t border-border-strong flex flex-col gap-2">
         <button
-          onClick={() => setDrawerContent('local_alert')}
-          className="w-full bg-surface-0 border border-border-strong py-3 text-[10px] font-bold uppercase tracking-widest shadow-[2px_2px_0_rgba(26,26,26,1)]"
+          onClick={() => {
+            markSafe();
+            setDrawerContent('local_alert');
+          }}
+          className="w-full bg-accent-success text-surface-3 border border-border-strong py-3 text-[10px] font-bold uppercase tracking-widest shadow-[2px_2px_0_rgba(26,26,26,1)]"
         >
           I am safe
         </button>

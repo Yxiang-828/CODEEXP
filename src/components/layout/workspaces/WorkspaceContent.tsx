@@ -26,6 +26,7 @@ import {
   ResponderOversight,
   SourceHealth,
   IncidentOps,
+  DemoHelpers,
 } from './OpsWorkspaces';
 
 const REGISTRY: Record<string, () => React.JSX.Element> = {
@@ -52,6 +53,7 @@ const REGISTRY: Record<string, () => React.JSX.Element> = {
   case_oversight: CaseOversight,
   responder_oversight: ResponderOversight,
   source_health: SourceHealth,
+  demo_helpers: DemoHelpers,
 };
 
 export default function WorkspaceContent({ id }: { id: string }) {

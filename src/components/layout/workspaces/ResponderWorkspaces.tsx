@@ -15,7 +15,7 @@ import StatusPipeline from '../../primitives/StatusPipeline';
 import SlashComposer from '../../primitives/SlashComposer';
 
 export function DutyStatus() {
-  const { responders, toggleDuty, selfResponderId } = useAppContext();
+  const { responders, toggleDuty, selfResponderId, setSelfResponderId } = useAppContext();
   const self = responders.find((r) => r.id === selfResponderId);
   const onDuty = self?.status !== 'out';
   return (
@@ -23,10 +23,24 @@ export function DutyStatus() {
       <h2 className="text-xl font-serif italic font-black">Duty</h2>
       <Card>
         <strong className="block uppercase text-[10px] tracking-widest mb-2">
-          You are {onDuty ? 'on' : 'off'} duty
+          You are {self?.name} · {onDuty ? 'on' : 'off'} duty
         </strong>
-        Capabilities: medical · search · aux. Shift end 22:00.
+        Capabilities: {self?.role} · {self?.org}. Shift end 22:00.
       </Card>
+      <label className="text-[9px] uppercase font-bold tracking-widest text-text-secondary">
+        Switch identity (demo)
+      </label>
+      <select
+        value={selfResponderId}
+        onChange={(e) => setSelfResponderId(e.target.value)}
+        className="w-full p-2 border border-border-strong bg-surface-0 text-[11px] font-mono font-bold outline-none"
+      >
+        {responders.map((r) => (
+          <option key={r.id} value={r.id}>
+            {r.name} · {r.org} · {r.role}
+          </option>
+        ))}
+      </select>
       <button
         onClick={() => toggleDuty(selfResponderId, !onDuty)}
         className={`w-full py-3 text-[11px] uppercase font-black tracking-widest border border-border-strong shadow-[3px_3px_0_rgba(26,26,26,1)] ${

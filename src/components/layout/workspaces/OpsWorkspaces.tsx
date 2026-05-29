@@ -459,6 +459,90 @@ export function ResponderOversight() {
   );
 }
 
+export function DemoHelpers() {
+  const { simulateEvent, resetDemo, declareIncident, setDrawerContent } = useAppContext();
+  return (
+    <div className="p-5 flex flex-col gap-4">
+      <h2 className="text-xl font-serif italic font-black">Demo helpers</h2>
+      <p className="text-[10px] uppercase font-bold tracking-widest text-text-secondary">
+        Inject events for testing when live APIs are slow.
+      </p>
+      <Card>
+        <strong className="block uppercase text-[10px] tracking-widest mb-2">Inject event</strong>
+        <div className="flex flex-col gap-2">
+          <button
+            onClick={() => {
+              simulateEvent({
+                kind: 'flood',
+                title: 'Flash flood · Bukit Timah',
+                severity: 3,
+                location: { lng: 103.78, lat: 1.33 },
+                source: 'demo injection',
+              });
+            }}
+            className="w-full bg-surface-0 py-2 text-[10px] uppercase font-bold tracking-widest border border-border-strong shadow-[2px_2px_0_rgba(26,26,26,1)] hover:bg-surface-2"
+          >
+            Inject flood event
+          </button>
+          <button
+            onClick={() => {
+              simulateEvent({
+                kind: 'crash',
+                title: 'Bus collision · Yishun Ave 2',
+                severity: 4,
+                location: { lng: 103.84, lat: 1.43 },
+                source: 'demo injection',
+              });
+            }}
+            className="w-full bg-surface-0 py-2 text-[10px] uppercase font-bold tracking-widest border border-border-strong shadow-[2px_2px_0_rgba(26,26,26,1)] hover:bg-surface-2"
+          >
+            Inject crash event
+          </button>
+          <button
+            onClick={() => {
+              simulateEvent({
+                kind: 'fire',
+                title: 'Warehouse fire · Jurong',
+                severity: 4,
+                location: { lng: 103.71, lat: 1.32 },
+                source: 'demo injection',
+              });
+            }}
+            className="w-full bg-surface-0 py-2 text-[10px] uppercase font-bold tracking-widest border border-border-strong shadow-[2px_2px_0_rgba(26,26,26,1)] hover:bg-surface-2"
+          >
+            Inject fire event
+          </button>
+          <button
+            onClick={() => {
+              declareIncident({
+                kind: 'weather',
+                title: 'Severe thunderstorm · Central',
+                severity: 2,
+                location: { lng: 103.85, lat: 1.35 },
+                source: 'demo injection',
+              });
+            }}
+            className="w-full bg-surface-0 py-2 text-[10px] uppercase font-bold tracking-widest border border-border-strong shadow-[2px_2px_0_rgba(26,26,26,1)] hover:bg-surface-2"
+          >
+            Inject weather advisory
+          </button>
+        </div>
+      </Card>
+      <button
+        onClick={() => {
+          if (window.confirm('Reset all demo state to seed?')) {
+            resetDemo();
+            setDrawerContent(null);
+          }
+        }}
+        className="w-full bg-accent-critical text-text-inverse py-3 text-[10px] uppercase font-bold tracking-widest border border-border-strong shadow-[3px_3px_0_rgba(26,26,26,1)]"
+      >
+        Reset demo state
+      </button>
+    </div>
+  );
+}
+
 export function SourceHealth() {
   const { sources, liveSnapshot } = useAppContext();
   return (

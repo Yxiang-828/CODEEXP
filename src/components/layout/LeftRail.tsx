@@ -17,6 +17,7 @@ export default function LeftRail() {
     role,
     setDrawerContent,
     setActiveCaseId,
+    events,
     cases,
     reports,
     sosSessions,
@@ -28,9 +29,12 @@ export default function LeftRail() {
 
   const self = responders.find((r) => r.id === selfResponderId);
 
+  const bulletinCount = events.filter((e) => e.status === 'verified').length + reports.filter((r) => r.status === 'pending').length + sosSessions.filter((s) => !['resolved', 'cancelled'].includes(s.status)).length;
+  const assignmentCount = sosSessions.filter((s) => s.assignedResponderId === selfResponderId && !['resolved', 'cancelled'].includes(s.status)).length;
+
   const responderQueues = [
-    { icon: Map, label: 'Bulletin', count: 5, action: () => setDrawerContent('mission_board') },
-    { icon: ClipboardList, label: 'Assignments', count: 1, action: () => setDrawerContent('assignment_detail') },
+    { icon: Map, label: 'Bulletin', count: bulletinCount, action: () => setDrawerContent('mission_board') },
+    { icon: ClipboardList, label: 'Assignments', count: assignmentCount, action: () => setDrawerContent('assignment_detail') },
     {
       icon: ShieldAlert,
       label: 'Verify',
@@ -55,6 +59,7 @@ export default function LeftRail() {
     },
     { icon: ClipboardList, label: 'Cases', count: cases.length, action: () => setDrawerContent('case_oversight') },
     { icon: Users, label: 'Roster', action: () => setDrawerContent('responder_oversight') },
+    { icon: Activity, label: 'Demo', action: () => setDrawerContent('demo_helpers') },
   ];
 
   const queues = role === 'responder' ? responderQueues : opsQueues;

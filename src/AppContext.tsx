@@ -171,6 +171,11 @@ interface AppState {
   leaveGroup: (groupId: string, responderId: string) => void;
   joinCase: (caseId: string, responderId: string) => void;
   leaveCase: (caseId: string, responderId: string) => void;
+
+  setSelfResponderId: (id: string) => void;
+  markSafe: () => void;
+  simulateEvent: (e: Partial<CanonicalEvent>) => void;
+  resetDemo: () => void;
 }
 
 const AppContext = createContext<AppState | undefined>(undefined);
@@ -178,7 +183,8 @@ const AppContext = createContext<AppState | undefined>(undefined);
 const NOW = Date.now();
 const T = (mins: number) => NOW - mins * 60_000;
 
-// Seed locations are real SG coords
+// Minimal seed — just enough so the app doesn't look broken on first load.
+// Everything else must come from user actions (reports, SOS, declares).
 const seed = {
   groups: [
     {
@@ -248,27 +254,6 @@ const seed = {
       source: 'SCDF + 4 corroborating reports',
       createdAt: T(22),
     },
-    {
-      id: 'EV-1002',
-      kind: 'crash',
-      title: 'Multi-vehicle collision on AYE',
-      severity: 4 as SeverityLevel,
-      status: 'verified',
-      location: { lng: 103.79, lat: 1.28 },
-      source: 'SCDF dispatch',
-      createdAt: T(8),
-      caseId: 'CASE-ALPHA-09',
-    },
-    {
-      id: 'EV-1003',
-      kind: 'hazard',
-      title: 'Fallen tree blocking lane · Tampines Ave 4',
-      severity: 1 as SeverityLevel,
-      status: 'verified',
-      location: { lng: 103.94, lat: 1.35 },
-      source: 'OneMap traffic',
-      createdAt: T(46),
-    },
   ] as CanonicalEvent[],
 
   reports: [
@@ -282,28 +267,9 @@ const seed = {
       status: 'pending',
       createdAt: T(1),
     },
-    {
-      id: 'REP-4920',
-      kind: 'medical',
-      title: 'Citizen collapsed · City Hall MRT',
-      body: 'Elderly man collapsed near exit B.',
-      location: { lng: 103.853, lat: 1.293 },
-      reporterTrust: 0.65,
-      status: 'pending',
-      createdAt: T(5),
-    },
   ] as CitizenReport[],
 
-  sosSessions: [
-    {
-      id: 'SOS-029',
-      citizenName: 'U_7821',
-      category: 'medical',
-      location: { lng: 103.742, lat: 1.333 }, // Jurong East MRT
-      status: 'requesting',
-      startedAt: T(0.5),
-    },
-  ] as DistressSession[],
+  sosSessions: [] as DistressSession[],
 
   responders: [
     {
@@ -374,43 +340,33 @@ const seed = {
       text: 'On scene. 3 casualties safely extracted. Requesting additional trauma supplies.',
       ts: T(12),
     },
-    {
-      id: 'CH-3',
-      caseId: 'CASE-ALPHA-09',
-      authorId: 'host',
-      kind: 'host',
-      text: 'Delta-1 is 1.0 km away with surplus supplies. Routed to your position.',
-      chips: [
-        { label: 'tool: responder_lookup', ref: 'R-DELTA-1' },
-        { label: 'tool: route', ref: '1.0 km · 3 min' },
-      ],
-      ts: T(11),
-    },
-    {
-      id: 'CH-4',
-      caseId: 'CASE-ALPHA-09',
-      authorId: 'R-CHARLIE-3',
-      kind: 'message',
-      text: 'Roger. Perimeter holding. Watching for hazmat from leaking tank.',
-      ts: T(8),
-    },
   ] as ChatEntry[],
 
   sources: [
     { id: 'src-1', name: 'NEA PSI', state: 'fresh', lastAgeS: 35 },
     { id: 'src-2', name: 'NEA rainfall', state: 'fresh', lastAgeS: 22 },
     { id: 'src-3', name: 'NEA 2hr forecast', state: 'fresh', lastAgeS: 90 },
-    { id: 'src-4', name: 'SCDF dispatch', state: 'fresh', lastAgeS: 12 },
-    { id: 'src-5', name: 'MOH alerts', state: 'fresh', lastAgeS: 90 },
-    { id: 'src-6', name: 'OneMap traffic', state: 'stale', lastAgeS: 540 },
-    { id: 'src-7', name: 'Reports intake', state: 'fresh', lastAgeS: 5 },
   ] as SourceHealth[],
 };
 
-const SELF_ID = 'R-ECHO-1';
+const STORAGE_KEY = 'quickaid-role';
+const STORAGE_RESPONDER_KEY = 'quickaid-responder';
+
+function readRole(): Role {
+  try { const r = localStorage.getItem(STORAGE_KEY) as Role; if (r === 'citizen' || r === 'responder' || r === 'ops') return r; } catch {}
+  return 'citizen';
+}
+function saveRole(r: Role) { try { localStorage.setItem(STORAGE_KEY, r); } catch {} }
+
+function readSelfResponder(): string {
+  try { return localStorage.getItem(STORAGE_RESPONDER_KEY) ?? 'R-ECHO-1'; } catch { return 'R-ECHO-1'; }
+}
+function saveSelfResponder(id: string) { try { localStorage.setItem(STORAGE_RESPONDER_KEY, id); } catch {} }
 
 export const AppProvider = ({ children }: { children: ReactNode }) => {
-  const [role, setRole] = useState<Role>('citizen');
+  const [role, setRoleRaw] = useState<Role>(readRole());
+  const setRole = useCallback((r: Role) => { saveRole(r); setRoleRaw(r); }, []);
+
   const [drawerContent, setDrawerContentRaw] = useState<string | null>(null);
   const [shellState, setShellState] = useState<ShellState>('S0');
 
@@ -420,13 +376,14 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   const [responders, setResponders] = useState<Responder[]>(seed.responders);
   const [cases, setCases] = useState<CaseRoom[]>(seed.cases);
   const [chat, setChat] = useState<ChatEntry[]>(seed.chat);
-  const [sources] = useState<SourceHealth[]>(seed.sources);
+  const [sources, setSources] = useState<SourceHealth[]>(seed.sources);
   const [groups, setGroups] = useState<Group[]>(seed.groups);
   const [liveSnapshot, setLiveSnapshot] = useState<LiveSnapshot | null>(null);
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [activeCaseId, setActiveCaseId] = useState<string | null>(null);
   const [tracking, setTracking] = useState<TrackingState | null>(null);
+  const [selfResponderId, setSelfResponderId] = useState<string>(readSelfResponder());
 
   const setDrawerContent = useCallback((id: string | null) => {
     setDrawerContentRaw(id);
@@ -440,6 +397,14 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       const snap = await fetchLiveSnapshot();
       if (!alive) return;
       setLiveSnapshot(snap);
+      // Update source health timestamps so they look alive
+      setSources((prev) =>
+        prev.map((s) =>
+          s.id === 'src-1' || s.id === 'src-2' || s.id === 'src-3'
+            ? { ...s, state: 'fresh', lastAgeS: Math.floor((Date.now() - snap.fetchedAt) / 1000) }
+            : s
+        )
+      );
       // Promote dangerous PSI readings into the event stream
       setEvents((prev) => {
         const next = prev.filter((e) => !e.id.startsWith('LIVE-'));
@@ -673,7 +638,49 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     );
   };
 
-  // Simulated responder movement
+  const setSelfResponderIdAction: AppState['setSelfResponderId'] = (id) => {
+    saveSelfResponder(id);
+    setSelfResponderId(id);
+  };
+
+  const markSafe: AppState['markSafe'] = () => {
+    setTracking(null);
+  };
+
+  const simulateEvent: AppState['simulateEvent'] = (e) => {
+    const id = newId('EV');
+    setEvents((prev) => [
+      {
+        id,
+        kind: e.kind ?? 'other',
+        title: e.title ?? 'Simulated incident',
+        severity: (e.severity ?? 2) as SeverityLevel,
+        status: 'verified',
+        location: e.location ?? { lng: 103.85, lat: 1.35 },
+        source: e.source ?? 'demo injection',
+        createdAt: Date.now(),
+        liveValue: e.liveValue,
+      },
+      ...prev,
+    ]);
+  };
+
+  const resetDemo: AppState['resetDemo'] = () => {
+    setEvents(seed.events);
+    setReports(seed.reports);
+    setSosSessions(seed.sosSessions);
+    setResponders(seed.responders);
+    setCases(seed.cases);
+    setChat(seed.chat);
+    setSources(seed.sources);
+    setGroups(seed.groups);
+    setTracking(null);
+    setDrawerContent(null);
+    setSelectedId(null);
+    setActiveCaseId(null);
+  };
+
+  // Simulated responder movement + auto-advance SOS on arrival
   useEffect(() => {
     const t = setInterval(() => {
       setResponders((prev) =>
@@ -685,6 +692,18 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
           const dy = sos.location.lat - r.location.lat;
           const dist = Math.hypot(dx, dy);
           if (dist < 0.0008) {
+            // Auto-advance SOS to arrived
+            setSosSessions((sprev) =>
+              sprev.map((s) => (s.id === r.assignedSosId ? { ...s, status: 'arrived' } : s))
+            );
+            setTracking({
+              kind: 'SOS LIVE',
+              title: 'Responder arrived',
+              eta: 'now',
+              progress: 0.85,
+              tone: 'critical',
+              drawerId: 'sos_live',
+            });
             return { ...r, status: 'on_scene', location: sos.location };
           }
           const step = Math.min(0.0015, dist);
@@ -731,7 +750,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     tracking,
     setTracking,
     briefingInView,
-    selfResponderId: SELF_ID,
+    selfResponderId,
     fileReport,
     claimReport,
     verifyReport,
@@ -748,6 +767,10 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     leaveGroup,
     joinCase,
     leaveCase,
+    setSelfResponderId: setSelfResponderIdAction,
+    markSafe,
+    simulateEvent,
+    resetDemo,
   };
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
