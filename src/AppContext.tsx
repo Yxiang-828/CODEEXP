@@ -598,8 +598,8 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   }, [liveSnapshot]);
 
   const askHost: AppState['askHost'] = async (caseId, query) => {
-    const key = import.meta.env.VITE_OPENROUTER_API_KEY;
-    const model = import.meta.env.VITE_AI_MODEL || 'meta-llama/llama-3.3-70b-instruct:free';
+    const key = (typeof __OPENROUTER_API_KEY__ !== 'undefined' ? __OPENROUTER_API_KEY__ : '') as string;
+    const model = (typeof __OPENROUTER_MODEL__ !== 'undefined' ? __OPENROUTER_MODEL__ : 'meta-llama/llama-3.3-70b-instruct:free') as string;
 
     aiRequestCount.current += 1;
     const count = aiRequestCount.current;
