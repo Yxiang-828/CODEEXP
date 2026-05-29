@@ -209,11 +209,11 @@ export default function MapCanvas() {
   const hospitalPois = liveLayers?.hospitals.length ? liveLayers.hospitals : DEMO_HOSPITAL_POIS;
   const allAedPois = liveLayers?.aeds.length ? liveLayers.aeds : DEMO_AED_POIS;
   const allTrafficPois = liveLayers && (liveLayers.traffic.length || liveLayers.speedBands.length)
-    ? [...liveLayers.traffic, ...liveLayers.speedBands].slice(0, 120)
+    ? [...liveLayers.traffic, ...liveLayers.speedBands]
     : DEMO_TRAFFIC_POIS;
   const mrtStatus = liveLayers?.mrt.length ? liveLayers.mrt : MRT_STATUS;
-  const aedPois = allAedPois.slice(0, 400);
-  const trafficPois = allTrafficPois.slice(0, 120);
+  const aedPois = allAedPois;
+  const trafficPois = allTrafficPois;
 
   useEffect(() => {
     if (drawingSession) return;

@@ -133,19 +133,8 @@ async function fetchDataMallLayers(now) {
 
   if (speedResponse.ok) {
     const data = await speedResponse.json();
-    const raw = (Array.isArray(data?.value) ? data.value : []).map(toSpeedBand).filter(Boolean);
-    // Deduplicate by road name + spatially bin so markers spread across the island
-    const seenRoads = new Set();
-    const binned = [];
-    for (const sb of raw) {
-      const key = `${sb.name}|${Math.round(sb.lng * 10)},${Math.round(sb.lat * 10)}`;
-      if (seenRoads.has(key)) continue;
-      seenRoads.add(key);
-      binned.push(sb);
-    }
-    // Cap at 200 but pick a spatially diverse subset if we exceed it
-    speedBands.push(...(binned.length > 200 ? spatialSampleSpeedBands(binned, 200) : binned));
-    sources.push(source('DataMall TrafficSpeedBands', 'fresh', `${raw.length} raw rows; ${speedBands.length} unique roads shown after dedup + spatial sampling.`));
+    speedBands.push(...(Array.isArray(data?.value) ? data.value : []).map(toSpeedBand).filter(Boolean));
+    sources.push(source('DataMall TrafficSpeedBands', 'fresh', `${speedBands.length} speed-band rows returned.`));
   } else {
     sources.push(source('DataMall TrafficSpeedBands', 'down', await shortText(speedResponse)));
   }
