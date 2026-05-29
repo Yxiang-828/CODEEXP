@@ -149,8 +149,9 @@ interface AppState {
   setTracking: (t: TrackingState | null) => void;
 
   briefingInView: number;
-  selfResponderId: string;
+  selfResponderId: string | null;
 
+  createResponder: (r: Omit<Responder, 'id' | 'status' | 'location' | 'groups'>) => string;
   fileReport: (r: Omit<CitizenReport, 'id' | 'status' | 'createdAt' | 'reporterTrust'>) => string;
   claimReport: (id: string, by: string) => void;
   verifyReport: (id: string) => void;
@@ -271,6 +272,8 @@ const seed = {
 
   sosSessions: [] as DistressSession[],
 
+  // Only SCDF/government responders are hardcoded system assets.
+  // Volunteer responders are created by users (ops approves or self-registers).
   responders: [
     {
       id: 'R-BRAVO-9',
@@ -280,24 +283,6 @@ const seed = {
       status: 'on_scene',
       location: { lng: 103.792, lat: 1.282 },
       groups: ['G-SCDF-EAST'],
-    },
-    {
-      id: 'R-CHARLIE-3',
-      name: 'Charlie-3',
-      org: 'Volunteer',
-      role: 'fire',
-      status: 'on_scene',
-      location: { lng: 103.788, lat: 1.278 },
-      groups: ['G-FIRE-VOL'],
-    },
-    {
-      id: 'R-ECHO-1',
-      name: 'Echo-1',
-      org: 'Volunteer',
-      role: 'medic',
-      status: 'ready',
-      location: { lng: 103.85, lat: 1.3 },
-      groups: ['G-MEDIC-VOL'],
     },
     {
       id: 'R-DELTA-1',
@@ -316,7 +301,7 @@ const seed = {
       name: 'ALPHA-09',
       severity: 4 as SeverityLevel,
       centroid: { lng: 103.79, lat: 1.28 },
-      members: ['R-BRAVO-9', 'R-CHARLIE-3'],
+      members: ['R-BRAVO-9'],
       captain: 'R-BRAVO-9',
       state: 'active',
       startedAt: T(60),
@@ -329,7 +314,7 @@ const seed = {
       caseId: 'CASE-ALPHA-09',
       authorId: 'system',
       kind: 'system',
-      text: 'Case ALPHA-09 formed. Bravo-9 captain. Charlie-3 joined.',
+      text: 'Case ALPHA-09 formed. Bravo-9 captain.',
       ts: T(60),
     },
     {
@@ -358,10 +343,15 @@ function readRole(): Role {
 }
 function saveRole(r: Role) { try { localStorage.setItem(STORAGE_KEY, r); } catch {} }
 
-function readSelfResponder(): string {
-  try { return localStorage.getItem(STORAGE_RESPONDER_KEY) ?? 'R-ECHO-1'; } catch { return 'R-ECHO-1'; }
+function readSelfResponder(): string | null {
+  try { return localStorage.getItem(STORAGE_RESPONDER_KEY); } catch { return null; }
 }
-function saveSelfResponder(id: string) { try { localStorage.setItem(STORAGE_RESPONDER_KEY, id); } catch {} }
+function saveSelfResponder(id: string | null) {
+  try {
+    if (id) localStorage.setItem(STORAGE_RESPONDER_KEY, id);
+    else localStorage.removeItem(STORAGE_RESPONDER_KEY);
+  } catch {}
+}
 
 export const AppProvider = ({ children }: { children: ReactNode }) => {
   const [role, setRoleRaw] = useState<Role>(readRole());
@@ -383,7 +373,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [activeCaseId, setActiveCaseId] = useState<string | null>(null);
   const [tracking, setTracking] = useState<TrackingState | null>(null);
-  const [selfResponderId, setSelfResponderId] = useState<string>(readSelfResponder());
+  const [selfResponderId, setSelfResponderId] = useState<string | null>(readSelfResponder());
 
   const setDrawerContent = useCallback((id: string | null) => {
     setDrawerContentRaw(id);
@@ -643,6 +633,21 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     setSelfResponderId(id);
   };
 
+  const createResponder: AppState['createResponder'] = (r) => {
+    const id = newId('R');
+    const rec: Responder = {
+      ...r,
+      id,
+      status: 'out',
+      location: { lng: 103.85, lat: 1.3 },
+      groups: [],
+    };
+    setResponders((prev) => [...prev, rec]);
+    saveSelfResponder(id);
+    setSelfResponderId(id);
+    return id;
+  };
+
   const markSafe: AppState['markSafe'] = () => {
     setTracking(null);
   };
@@ -768,6 +773,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     joinCase,
     leaveCase,
     setSelfResponderId: setSelfResponderIdAction,
+    createResponder,
     markSafe,
     simulateEvent,
     resetDemo,

@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import {
   ClipboardList,
   CheckCircle,
@@ -15,34 +16,94 @@ import StatusPipeline from '../../primitives/StatusPipeline';
 import SlashComposer from '../../primitives/SlashComposer';
 
 export function DutyStatus() {
-  const { responders, toggleDuty, selfResponderId, setSelfResponderId } = useAppContext();
+  const { responders, toggleDuty, selfResponderId, setSelfResponderId, createResponder } = useAppContext();
   const self = responders.find((r) => r.id === selfResponderId);
   const onDuty = self?.status !== 'out';
+  const [callsign, setCallsign] = useState('');
+  const [roleType, setRoleType] = useState<'medic' | 'fire' | 'search' | 'aux'>('medic');
+  const [orgType, setOrgType] = useState<'Volunteer' | 'SPF' | 'Medic'>('Volunteer');
+
+  if (!self) {
+    return (
+      <div className="p-5 flex flex-col gap-4">
+        <h2 className="text-xl font-serif italic font-black">Volunteer profile</h2>
+        <p className="text-[10px] uppercase font-bold tracking-widest text-text-secondary">
+          Create your responder identity to join operations.
+        </p>
+        <Card>
+          <strong className="block uppercase text-[10px] tracking-widest mb-2">Callsign</strong>
+          <input
+            value={callsign}
+            onChange={(e) => setCallsign(e.target.value)}
+            placeholder="e.g. Echo-1"
+            className="w-full p-2 border border-border-strong bg-surface-0 text-[11px] font-mono font-bold outline-none"
+          />
+        </Card>
+        <Card>
+          <strong className="block uppercase text-[10px] tracking-widest mb-2">Org</strong>
+          <select
+            value={orgType}
+            onChange={(e) => setOrgType(e.target.value as typeof orgType)}
+            className="w-full p-2 border border-border-strong bg-surface-0 text-[11px] font-mono font-bold outline-none"
+          >
+            <option value="Volunteer">Volunteer</option>
+            <option value="SPF">SPF Auxiliary</option>
+            <option value="Medic">Private Medic</option>
+          </select>
+        </Card>
+        <Card>
+          <strong className="block uppercase text-[10px] tracking-widest mb-2">Capability</strong>
+          <select
+            value={roleType}
+            onChange={(e) => setRoleType(e.target.value as typeof roleType)}
+            className="w-full p-2 border border-border-strong bg-surface-0 text-[11px] font-mono font-bold outline-none"
+          >
+            <option value="medic">Medical</option>
+            <option value="fire">Fire</option>
+            <option value="search">Search &amp; Rescue</option>
+            <option value="aux">Auxiliary</option>
+          </select>
+        </Card>
+        <button
+          disabled={!callsign.trim()}
+          onClick={() => {
+            createResponder({ name: callsign.trim(), org: orgType, role: roleType });
+          }}
+          className="w-full bg-accent-success text-surface-3 py-3 text-[11px] uppercase font-black tracking-widest border border-border-strong shadow-[3px_3px_0_rgba(26,26,26,1)] disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          Create profile &amp; go on duty
+        </button>
+        <p className="text-[9px] uppercase font-bold tracking-widest text-text-secondary">
+          SCDF responders are system-managed and cannot be created here.
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className="p-5 flex flex-col gap-4">
       <h2 className="text-xl font-serif italic font-black">Duty</h2>
       <Card>
         <strong className="block uppercase text-[10px] tracking-widest mb-2">
-          You are {self?.name} · {onDuty ? 'on' : 'off'} duty
+          You are {self.name} · {onDuty ? 'on' : 'off'} duty
         </strong>
-        Capabilities: {self?.role} · {self?.org}. Shift end 22:00.
+        Capabilities: {self.role} · {self.org}. Shift end 22:00.
       </Card>
-      <label className="text-[9px] uppercase font-bold tracking-widest text-text-secondary">
-        Switch identity (demo)
-      </label>
-      <select
-        value={selfResponderId}
-        onChange={(e) => setSelfResponderId(e.target.value)}
-        className="w-full p-2 border border-border-strong bg-surface-0 text-[11px] font-mono font-bold outline-none"
-      >
-        {responders.map((r) => (
-          <option key={r.id} value={r.id}>
-            {r.name} · {r.org} · {r.role}
-          </option>
-        ))}
-      </select>
+      {responders.length > 2 && (
+        <select
+          value={selfResponderId ?? ''}
+          onChange={(e) => setSelfResponderId(e.target.value)}
+          className="w-full p-2 border border-border-strong bg-surface-0 text-[11px] font-mono font-bold outline-none"
+        >
+          {responders.map((r) => (
+            <option key={r.id} value={r.id}>
+              {r.name} · {r.org} · {r.role}
+            </option>
+          ))}
+        </select>
+      )}
       <button
-        onClick={() => toggleDuty(selfResponderId, !onDuty)}
+        onClick={() => toggleDuty(selfResponderId!, !onDuty)}
         className={`w-full py-3 text-[11px] uppercase font-black tracking-widest border border-border-strong shadow-[3px_3px_0_rgba(26,26,26,1)] ${
           onDuty ? 'bg-surface-0 text-text-primary' : 'bg-accent-success text-surface-3'
         }`}
@@ -54,8 +115,22 @@ export function DutyStatus() {
 }
 
 export function VerifyQueue() {
-  const { reports, verifyReport, dismissReport, claimReport, selfResponderId } = useAppContext();
+  const { reports, verifyReport, dismissReport, claimReport, selfResponderId, setDrawerContent } = useAppContext();
   const queue = reports.filter((r) => r.status === 'pending' || r.status === 'claimed');
+  if (!selfResponderId) {
+    return (
+      <div className="p-5 flex flex-col gap-4">
+        <h2 className="text-xl font-serif italic font-black">Verify queue</h2>
+        <Card>Create a volunteer profile in <strong>Duty</strong> to claim and verify reports.</Card>
+        <button
+          onClick={() => setDrawerContent('duty')}
+          className="w-full bg-accent-info text-text-inverse py-3 text-[10px] uppercase font-bold tracking-widest border border-border-strong shadow-[3px_3px_0_rgba(26,26,26,1)]"
+        >
+          Open Duty workspace
+        </button>
+      </div>
+    );
+  }
   return (
     <div className="flex flex-col h-full">
       <div className="p-4 border-b border-border-strong">
