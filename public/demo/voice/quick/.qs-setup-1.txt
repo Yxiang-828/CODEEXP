@@ -1,0 +1,1 @@
+Signing in a resident, a responder, and operations on one shared map.

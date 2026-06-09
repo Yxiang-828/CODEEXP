@@ -1,47 +1,38 @@
-export type LiveLayerSourceState = 'fresh' | 'down' | 'not_configured' | 'rate_limited' | 'demo';
+// Client for /api/live/map-layers. The backend returns every live Singapore
+// feed normalized to the same GeoJSON-layer shape (see api/live/map-layers.js).
+// A feed that fails arrives as state:'down'/'not_configured' with an empty
+// collection — the map shows nothing for it, never a fake/demo point.
 
-export interface MapPoi {
+import type { FeatureCollection } from 'geojson';
+
+export type LayerState = 'fresh' | 'down' | 'not_configured';
+export type LayerCategory = 'air' | 'weather' | 'traffic' | 'health' | 'hazard';
+
+export interface LiveLayer {
   id: string;
-  kind?: 'hospital' | 'aed' | 'traffic';
-  name: string;
-  detail: string;
-  lng: number;
-  lat: number;
-  tone?: 'critical' | 'warning' | 'ok' | 'hospital' | 'aed' | string;
-  source?: 'live' | 'demo';
+  label: string;
+  category: LayerCategory;
+  source: string;
+  attribution: string;
+  state: LayerState;
+  fetchedAt: number;
+  count: number;
+  geojson: FeatureCollection;
+  error?: string;
 }
 
-export interface MrtStatusLine {
-  id: string;
-  name: string;
-  detail: string;
-  tone: 'critical' | 'warning' | 'ok';
-  source: 'demo' | 'live';
-  path: Array<[number, number]>;
-}
-
-export interface MapLayerSource {
-  name: string;
-  state: LiveLayerSourceState;
-  note: string;
-  checkedAt: number;
-}
-
-export interface LiveMapLayers {
+export interface LiveLayers {
   fetchedAt: number;
   cached: boolean;
-  hospitals: MapPoi[];
-  aeds: MapPoi[];
-  traffic: MapPoi[];
-  speedBands: MapPoi[];
-  mrt: MrtStatusLine[];
-  sources: MapLayerSource[];
+  layers: LiveLayer[];
 }
 
-export async function fetchMapLayers(): Promise<LiveMapLayers | null> {
-  const response = await fetch('/api/live/map-layers', {
-    headers: { accept: 'application/json' },
-  });
-  if (!response.ok) return null;
-  return response.json();
+export async function fetchMapLayers(): Promise<LiveLayers | null> {
+  try {
+    const res = await fetch('/api/live/map-layers', { headers: { accept: 'application/json' } });
+    if (!res.ok) return null;
+    return (await res.json()) as LiveLayers;
+  } catch {
+    return null;
+  }
 }

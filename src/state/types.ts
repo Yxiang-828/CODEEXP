@@ -1,7 +1,8 @@
 // Domain types for Kampung Kaki, grouped by cluster.
 // Clusters reflect the CSOT relation tree — see ./relations.ts.
 
-import type { SeverityLevel } from '../components/primitives/SeverityChip';
+/** L1–L5 severity used across events/reports/notifications. */
+export type SeverityLevel = 1 | 2 | 3 | 4 | 5;
 
 export type Role = 'citizen' | 'responder' | 'ops';
 export type ShellState = 'S0' | 'S2' | 'S4' | 'S6' | 'S9';
@@ -29,33 +30,88 @@ export interface CitizenReport {
   title: string;
   body: string;
   location: LngLat;
+  /** CSOT userId of the reporter — scopes the topic so only they + ops see it. */
+  ownerId?: string;
   reporterTrust: number;
-  status: 'pending' | 'claimed' | 'verified' | 'dismissed';
+  status: 'pending' | 'claimed' | 'verified' | 'dismissed' | 'investigating' | 'resolved';
   claimedBy?: string;
+  /** Set when ops dispatches the report to a responder to investigate. */
+  assignedInvestigatorId?: string;
+  investigatorName?: string;
   createdAt: number;
   promotedToEventId?: string;
   notifiedReporter?: boolean;
   auditTrail?: string[];
 }
 
+// An investigation a responder was dispatched to by ops (for non-emergency
+// reports). Lives in the operations cluster so the assigned responder + ops see
+// it; carries the report details so the responder needn't read the raw report.
+export interface InvestigationTask {
+  id: string;        // = reportId
+  reportId: string;
+  assignedTo: string;
+  assignedName?: string;
+  kind: CanonicalEvent['kind'];
+  title: string;
+  body: string;
+  location: LngLat;
+  status: 'open' | 'resolved';
+  createdAt: number;
+  outcome?: string;
+}
+
+// The kinds of help an SOS can need. A responder declares which of these they
+// can handle (proficiencies); paging matches the SOS category against them.
+export type SosCategory = 'medical' | 'fire' | 'trapped' | 'threat' | 'hazard' | 'other';
+
+// The PUBLIC SOS signal — the discoverable call for help. Responders + ops see
+// it (to decide whether to join); other citizens never receive it (owner-scoped
+// topic). It deliberately carries NO aid card / phone — those are private to the
+// case room and revealed only to responders who JOIN.
 export interface DistressSession {
   id: string;
+  /** CSOT userId of the citizen in distress — scopes the topic so only they +
+   *  responders/ops receive it; other citizens never see another's SOS. */
+  ownerId?: string;
   citizenName: string;
-  category: 'medical' | 'fire' | 'trapped' | 'threat' | 'hazard' | 'other';
+  category: SosCategory;
+  /** One line of context the citizen types when sending. */
+  details?: string;
   location: LngLat;
-  status:
-    | 'requesting'
-    | 'ack'
-    | 'en_route'
-    | 'arrived'
-    | 'resolving'
-    | 'resolved'
-    | 'cancelled';
-  assignedResponderId?: string;
+  /** requesting = open, no responder yet; active = ≥1 responder joined. */
+  status: 'requesting' | 'active' | 'resolved' | 'cancelled';
+  /** How many responders have joined — carried on the signal so non-member
+   *  responders/ops see traction without the private member list. */
+  memberCount?: number;
   startedAt: number;
   citizenConfirmedSafe?: boolean;
   responderConfirmedSafe?: boolean;
   finalReport?: string;
+}
+
+// A responder who JOINED an SOS case. Lives in the PRIVATE case room
+// (csot/case/<caseId>/member/<id>) — visible only to the owner + joined
+// responders (+ ops oversight), never to other citizens or non-joined responders.
+export interface CaseMember {
+  id: string;
+  name: string;
+  /** What this person IS on the case — people coordinate by role+skills, not names. */
+  role: Role;
+  proficiencies?: SosCategory[];
+  location: LngLat;
+  status: 'en_route' | 'arrived';
+  eta?: string;
+  joinedAt: number;
+}
+
+// Private case details, revealed to members on join (aid card + contact).
+// Lives at csot/case/<caseId>/info.
+export interface SosCaseDetails {
+  ownerName: string;
+  category: SosCategory;
+  phone?: string;
+  aidCard?: AidCard;
 }
 
 // ──────────────────────────────────────────────────────────────────────
@@ -83,19 +139,6 @@ export interface CanonicalEvent {
   caseRequestedAt?: number;
 }
 
-export interface EmergencyZone {
-  id: string;
-  title: string;
-  kind: 'health' | 'fire' | 'flood' | 'accident' | 'hazard';
-  severity: SeverityLevel;
-  status: 'draft' | 'pending_review' | 'declared' | 'archived';
-  description: string;
-  center: LngLat;
-  area: LngLat[];
-  declaredBy: string;
-  createdAt: number;
-}
-
 // ──────────────────────────────────────────────────────────────────────
 // CLUSTER · operations  (live response work)
 // cases ↔ chat (chat[].caseId → cases.id)
@@ -113,6 +156,10 @@ export interface Responder {
   assignedSosId?: string;
   groups: string[];
   unitType?: 'volunteer' | 'professional';
+  /** Whether the responder is currently on shift — only on-duty responders are paged. */
+  onDuty?: boolean;
+  /** SOS categories this responder can handle — drives who gets paged. */
+  proficiencies?: SosCategory[];
   demo?: boolean;
   covert?: boolean;
   note?: string;
@@ -141,6 +188,10 @@ export interface ChatEntry {
   id: string;
   caseId: string;
   authorId: string;
+  /** Display name of the author, carried so readers needn't resolve the roster. */
+  authorName?: string;
+  /** Author's role — what readers actually identify each other by. */
+  authorRole?: Role;
   kind: 'message' | 'system' | 'host' | 'voice';
   text: string;
   chips?: { label: string; ref: string }[];
@@ -164,60 +215,40 @@ export interface AppUser {
   available: boolean;
 }
 
-export interface Group {
-  id: string;
-  name: string;
-  org: string;
-  kind: 'org' | 'capability' | 'geo' | 'community';
-  members: string[];
-  description: string;
-}
-
-export interface VolunteerEvent {
-  id: string;
-  title: string;
-  category:
-    | 'community_cleanup'
-    | 'first_aid_training'
-    | 'disaster_drill'
-    | 'food_distribution'
-    | 'elderly_care'
-    | 'youth_mentoring'
-    | 'environmental'
-    | 'other';
-  description: string;
-  location: LngLat;
-  venue: string;
-  organizer: string;
-  organizerRole?: Role | 'ops' | 'community';
-  date: string;
-  status: 'upcoming' | 'ongoing' | 'completed' | 'cancelled';
-  skillsNeeded: string[];
-  registeredResponderIds: string[];
-  createdAt: number;
+// First-aid "need to know" card every user fills once. NOT medical records —
+// self-disclosed particulars a lay first-aider needs on scene. Stored private
+// to the owner (csot/network/aidcard/<userId>); a snapshot is attached to an
+// SOS and revealed only to ops + the responder who takes the mission.
+export interface AidCard {
+  userId: string;
+  allergies: string;        // free text, e.g. "Penicillin, peanuts"
+  conditions: string[];     // asthma / epilepsy / diabetic / heart / pregnant …
+  carries: string[];        // inhaler / EpiPen / insulin / glucose …
+  access: string[];         // wheelchair / hard of hearing / visually impaired …
+  language: string;         // preferred language
+  nokName: string;          // next of kin
+  nokPhone: string;
+  nokRelation: string;
+  updatedAt: number;
 }
 
 // ──────────────────────────────────────────────────────────────────────
 // CLUSTER · intel  (signals, logs, awareness)
-// sources (provider health), liveSnapshot (NEA), actionLogs (audit), notifications (push)
+// liveSnapshot (NEA), actionLogs (audit), notifications (push)
 // ──────────────────────────────────────────────────────────────────────
-
-export interface SourceHealth {
-  id: string;
-  name: string;
-  state: 'fresh' | 'stale' | 'down' | 'shell_only' | 'not_configured' | 'unavailable';
-  lastAgeS: number;
-  note?: string;
-}
 
 export type NotificationTier = 'info' | 'watch' | 'urgent' | 'critical';
 
 export interface NotificationNotice {
   id: string;
+  /** 'broadcast' = an ops-authored area alert (vs incidental 'system' notices). */
+  kind?: 'system' | 'broadcast';
   tier: NotificationTier;
   roles: Role[];
   title: string;
   body: string;
+  /** Display scope of a broadcast — 'Islandwide' or a planning-area name. */
+  area?: string;
   targetId?: string;
   createdAt: number;
   ackBy: string[];
@@ -258,5 +289,3 @@ export interface SelectedMapItem {
   lat: number;
   tone?: string;
 }
-
-export type { SeverityLevel };

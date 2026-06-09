@@ -24,172 +24,195 @@ const PNG_OUT = join(DOCS_DIR, 'wireframe.png');
 const NOJEKYLL = join(DOCS_DIR, '.nojekyll');
 
 // id → { match, title, desc, comments[] }
-// match = suffix of screenshot file after the NN- prefix
-// Grid position is computed from lane.order[] so flows always read forward.
+// match = suffix of screenshot file after the NN- prefix.
+// Descriptions are feature/product-level — what this screen does for the user
+// and what makes it distinctive. Not implementation detail.
 const SCREENS = {
   // ── Auth ─────────────────────────────────────────────────────────
   'auth-login': {
     lane: 'auth',
     match: 'login',
-    title: 'Demo login',
-    desc: 'Three demo role buttons. Email/password fields are present but the real sign-in flow is stubbed for the prototype.',
+    title: 'Sign in',
+    desc: 'Single entry for citizens, responders, and operations staff. Picks the workspace each role gets when they enter.',
     comments: [
-      'Calls AppContext.demoLogin(role) — no backend auth in this section.',
-      'Login screen never sees the map; chrome and dock load only after auth.',
+      'Three roles share one app — the next screen reshapes around who you are.',
     ],
-
   },
 
   // ── Citizen ──────────────────────────────────────────────────────
+  'cz-band': {
+    lane: 'citizen',
+    match: 'citizen-liveband',
+    title: 'Live ops band (in-app)',
+    wide: true,
+    desc: 'Persistent band under the top chrome showing the four live data trackers the rest of the shell depends on, plus a one-tap entry to AI Kaki. Same data feeds the map overlays and the AI context.',
+    comments: [
+      'Chips: PSI (NEA · 60s) · Rain stations (NEA · 60s) · OneMap themes (5m cache) · LTA traffic (5m cache).',
+      'Provider state badge is the same SourceHealth the ops Source Health workspace shows — one truth.',
+      'Right edge: "Ask AI Kaki" jumps straight into the citizen_assistant prompt.',
+    ],
+  },
   'cz-home': {
     lane: 'citizen',
     match: 'citizen-home',
     title: 'Citizen home',
-    desc: 'OneMap SG basemap. Bottom dock exposes the citizen actions: Need help, Report, AI, Brief, Alerts.',
+    desc: 'Live Singapore map showing only published, trustworthy alerts plus public-data overlays (air quality, rainfall, hospitals, AEDs).',
     comments: [
-      'Only verified events + NEA live overlays show on this map (no responder pins).',
-      'GPS toggle is opt-in; pinned location is shown as a labelled point if granted.',
+      'OneMap SG basemap (CORS-open tiles); NEA PSI + rainfall overlays refresh every 60 s; OneMap hospitals + AEDs prefetched server-side.',
+      'No noise: unverified citizen reports stay off the public map.',
     ],
-
   },
   'cz-brief': {
     lane: 'citizen',
     match: 'citizen-briefing',
     title: 'Briefing',
-    desc: 'Aggregates verified incidents + role-relevant notifications. Number badge is the briefingInView selector.',
+    desc: 'A short, scrollable summary of what is happening near you right now and what ops has officially confirmed.',
     comments: [
-      'Driven by selectors.selectBriefingCounts(role) — same source for the top-chrome counter.',
+      'Rule-based, not AI: counts verified events + role-relevant notifications via a single deterministic selector (selectBriefingCounts in src/state/selectors.ts).',
+      'The badge in the top bar shows the same number — one truth, two surfaces.',
     ],
-
   },
   'cz-alerts': {
     lane: 'citizen',
     match: 'citizen-alerts',
     title: 'Nearby alerts',
-    desc: 'Verified events sorted by proximity to the live GPS, plus volunteer events within 5 km.',
+    desc: 'Active incidents and community events within walking / commuting distance, sorted by proximity.',
     comments: [
-      'Uses selectNearby<CanonicalEvent>(events, selfLocation, 5).',
-      'Falls back to Singapore centroid only when GPS is off — explicitly labelled.',
+      'Rule-based: filters verified events + volunteer events within 5 km of the device GPS, sorted by haversine distance.',
+      'Falls back to Singapore centroid (labelled) when GPS is off — no fake locations.',
     ],
-
   },
   'cz-report': {
     lane: 'citizen',
     match: 'citizen-report-compose',
-    title: 'File report',
-    desc: '4-step wizard: category → location → describe → review. Submits to ops queue, not directly to responders.',
+    title: 'File a report',
+    desc: 'Guided four-step report flow: pick a category, drop a pin, describe what you saw, review and submit.',
     comments: [
-      'Pin uses selfLocation; report body annotated "[approximate]" when GPS off.',
-      'Voice mode parses keywords (fire / flood / medical / crash) into a kind.',
+      'Goes to ops triage — citizens do not page responders directly except via SOS.',
+      'Voice or photo capture both supported; transcript is read back before sending.',
     ],
-
   },
   'cz-sos': {
     lane: 'citizen',
     match: 'citizen-sos-draft',
     title: 'SOS · pick category',
-    desc: 'Six categories. Single tap → broadcasts to ops + suitable responders simultaneously.',
+    desc: 'One screen, one tap: medical, fire, trapped, threat, hazard, or other. Sent simultaneously to ops and any suitable responders nearby.',
     comments: [
-      'GPS banner is yellow + "Singapore centroid" copy when no live location.',
-      'startSos(citizenName, category, location) — citizenName pulled from the AppUser table, not hardcoded.',
+      'Location banner makes the citizen aware whether the pin is exact (GPS) or approximate.',
     ],
-
   },
   'cz-sos-live': {
     lane: 'citizen',
-    match: 'citizen-sos-draft', // shares the SOS surface; the live flow is shown in tracking pill
+    match: 'citizen-sos-draft',
     title: 'SOS live tracking',
-    desc: 'Tracking pill + drawer show responder status, ETA, and two-acknowledgement closure rule.',
+    desc: 'After sending: a live status pill on the map and a step-by-step pipeline showing who is coming, when, and how to close the call safely.',
     comments: [
-      'ETA derived from getDistanceKm(responder, sos) and a 35 km/h surface mix.',
-      'Closure requires citizen + responder safe-acks before ops can audit-close.',
+      'ETA is real — distance between responder and citizen ÷ a 35 km/h surface-mix estimate, recomputed each state change.',
+      'Closure needs two acknowledgements (citizen safe + responder complete) — no silent resolves.',
     ],
-
   },
   'cz-ai': {
     lane: 'citizen',
     match: 'citizen-citizen-ai',
     title: 'AI Kaki',
-    desc: 'On-demand safety advisor for citizens at rest. Loads only when Ask is pressed.',
+    desc: 'A plain-language safety assistant the citizen can ask for guidance ("what should I do near the haze?", "where is the nearest AED?").',
     comments: [
-      'Workspace: citizen_assistant. Server prefetches PSI + nearest AED.',
-      'Says "unavailable" rather than invent live values — no PSI/AED hallucinations.',
+      'Grounded in live public data; says "unavailable" rather than invent a number.',
     ],
-
+    ai: {
+      provider: 'OpenRouter',
+      model: 'Dev: minimax/minimax-m2.5 · Production: openai/gpt-5.5 (swap via OPENROUTER_MODEL)',
+      workspace: 'citizen_assistant',
+      tools: ['live PSI (NEA)', 'rainfall (NEA)', 'nearest AED (OneMap)'],
+      fallback:
+        'When OpenRouter is unreachable, a deterministic responder built from the same tool results answers in the same shape.',
+    },
   },
 
   // ── Responder ────────────────────────────────────────────────────
+  'rp-band': {
+    lane: 'responder',
+    match: 'responder-liveband',
+    title: 'Live ops band (in-app)',
+    wide: true,
+    desc: 'Same persistent band, same chips — but the AI entry on the right goes to Mission Copilot for the responder.',
+    comments: [
+      'Lets a responder eyeball provider health (PSI, rainfall, OneMap, LTA) without leaving the map.',
+      'Right edge: "Ask Mission Copilot" jumps into the responder_mission prompt with the live position in context.',
+    ],
+  },
   'rp-home': {
     lane: 'responder',
     match: 'responder-home',
     title: 'Responder home',
-    desc: 'Left rail (status, mission board, assignments, signal checks, groups, events, logs). Live duty pill in top chrome.',
+    desc: 'Same map, fuller picture — adds active SOS pings, fellow responders, and case-room rooms in the side panel.',
     comments: [
-      'Responder map sees: verified events, SOS, all responders (with org tone), and own position.',
+      'Volunteers and professionals share one shell; visibility differs by role, not by app.',
     ],
-
   },
   'rp-mboard': {
     lane: 'responder',
     match: 'responder-mission-board',
     title: 'Mission board',
-    desc: 'Three collapsible panels: Current mission · Assignments · Joinable. Driven by the operations cluster.',
+    desc: 'Single board with the responder\'s current job, queued assignments, and joinable work — all in one place.',
     comments: [
-      'selectCurrentMission() resolves SOS-assigned-to-self first, then any case the responder has joined.',
+      'Designed to answer "what should I do next" in under three seconds.',
     ],
-
   },
   'rp-join': {
     lane: 'responder',
     match: 'responder-joinable-missions',
     title: 'Joinable missions',
-    desc: 'Open SOS + ops-formed case rooms within 8 km. Each row carries a fit % and reason.',
+    desc: 'Open SOS calls and ops-formed case rooms within reach, ranked by fit (skills, distance, availability).',
     comments: [
-      'fitForSos / fitForCase — capability × distance × ready-status × severity.',
-      'Restricted official cases get "monitor only" not "join".',
+      'Same fit score the Mission Copilot uses, just without the natural-language wrapper — rule-based, not AI.',
+      'Official-only operations show as "monitor only" so volunteers do not interfere with SCDF/SPF.',
     ],
-
   },
   'rp-copilot': {
     lane: 'responder',
     match: 'responder-mission-copilot',
     title: 'Mission copilot',
-    desc: 'Ranks joinable SOS + case rooms by fit × distance from the responder\'s live position.',
+    desc: 'A responder-side AI that picks the best two missions for you right now and explains why.',
     comments: [
-      'Workspace: responder_mission. Volunteer unitType de-prioritises suppression-heavy fires.',
-      'No host call until Ask pressed — quota-safe.',
+      'Pre-ranks options with a deterministic fit score (capability × distance × ready-status × severity) before asking the model — saves tokens and keeps reasoning auditable.',
+      'Volunteer kit de-prioritises suppression-heavy fires; restricted ops cases never surface as joinable.',
     ],
-
+    ai: {
+      provider: 'OpenRouter',
+      model: 'Dev: minimax/minimax-m2.5 · Production: openai/gpt-5.5 (swap via OPENROUTER_MODEL)',
+      workspace: 'responder_mission',
+      tools: ['live PSI (NEA)'],
+      fallback:
+        'When OpenRouter is unreachable, the same fit-scored list is returned with a plain-text summary.',
+    },
   },
   'rp-groups': {
     lane: 'responder',
     match: 'responder-groups',
-    title: 'Groups & cases',
-    desc: 'Org/capability cadres + live case rooms. Join/leave is a single CSOT mutation.',
+    title: 'Groups & rooms',
+    desc: 'Org units (SCDF East), capability cadres (AED Responders, Fire Auxiliary), and the live case rooms you belong to.',
     comments: [
-      'Cases section is the same data as the left rail "Rooms" list.',
+      'One tap to join or leave any group; case rooms come and go as ops opens them.',
     ],
-
   },
   'rp-events': {
     lane: 'responder',
     match: 'responder-volunteer-events',
     title: 'Volunteer events',
-    desc: 'Non-emergency community work nearby. Register / unregister persists to the network cluster.',
+    desc: 'Non-emergency community work — drills, cleanups, food distribution, elderly care — that citizens or ops have posted.',
     comments: [
-      'Sorted by distance from the responder\'s last-known location.',
+      'Same app, different rhythm: keeps volunteers engaged between live incidents.',
     ],
-
   },
   'rp-log': {
     lane: 'responder',
     match: 'responder-activity-log',
     title: 'Activity log',
-    desc: 'Append-only audit feed for all actions visible to the role.',
+    desc: 'A timestamped record of what happened on the responder\'s missions — for handover, debrief, and after-action.',
     comments: [
-      'Same backing store as ops/citizen logs; visibility filtered by ActionLog.visibleTo.',
+      'Same record ops sees; nothing hidden between roles.',
     ],
-
   },
 
   // ── Ops ──────────────────────────────────────────────────────────
@@ -197,166 +220,157 @@ const SCREENS = {
     lane: 'ops',
     match: 'ops-home',
     title: 'Ops home',
-    desc: 'Ops left rail: reports, dispatch, status, roster, new event, missions, logs. Drawing toolbox on the map.',
+    desc: 'The full map: every report, SOS, case, and responder position. Drawing toolbox on the right for declaring zones.',
     comments: [
-      'Only ops sees the polygon/lasso toolbox + draftPolygon state.',
+      'Only ops gets a polygon / lasso. Citizens and responders cannot draw their own areas.',
     ],
-
   },
   'ops-reports': {
     lane: 'ops',
     match: 'ops-report-queue',
     title: 'Report queue',
-    desc: 'Pending + claimed citizen reports. Verify / dismiss decisions promote to incidents.',
+    desc: 'Incoming citizen reports awaiting triage. Verify to publish them; dismiss to close the loop with the reporter.',
     comments: [
-      'Verify creates a CanonicalEvent and notifies the reporter + responders.',
-      'Dismiss notifies the reporter that nothing was published.',
+      'No public map item exists until ops has signed off — keeps misinformation out.',
     ],
-
   },
   'ops-distress': {
     lane: 'ops',
     match: 'ops-distress',
     title: 'Distress oversight',
-    desc: 'All non-resolved SOS sessions with category, status, citizen handle.',
+    desc: 'All live SOS calls. Single click jumps to dispatch for that specific call.',
     comments: [
-      'Click-through routes straight to the dispatch flow.',
+      'SOS bypass the verification queue — they go to ops and responders at once.',
     ],
-
   },
   'ops-cases': {
     lane: 'ops',
     match: 'ops-case-overview',
     title: 'Case overview',
-    desc: 'All cases — severity, state, members, captain. Real-time as members join/leave.',
+    desc: 'Every active case room with severity, lifecycle state, member count, and captain.',
     comments: [
-      'Case state pipeline: forming → staging → active → consolidating → resolved.',
+      'Lifecycle: forming → staging → active → consolidating → resolved.',
     ],
-
   },
   'ops-roster': {
     lane: 'ops',
     match: 'ops-responder-roster',
     title: 'Responder roster',
-    desc: 'Every responder, current status, current assignment. Used to manually retask units.',
+    desc: 'The available workforce — who is on duty, who is busy, who is en route. Manual retasking happens here.',
     comments: [
-      'Filters out offline units; pros + volunteers shown side-by-side with org tag.',
+      'Professionals and volunteers share one roster, tagged by org.',
     ],
-
   },
   'ops-dispatch': {
     lane: 'ops',
     match: 'ops-dispatch',
     title: 'Dispatch',
-    desc: 'Ranks ready/en-route responders by Euclidean distance to the active SOS or case centroid.',
+    desc: 'Picks the nearest available responder for the selected SOS or case. One tap to assign.',
     comments: [
-      'One-tap assign — also patches the responder to en_route + the SOS to ack.',
+      'Rule-based ranking — Euclidean distance × 111 km/deg to the call\'s coordinates. No AI in this loop; assignments must be auditable.',
+      'Assigning also patches the responder to en_route and the SOS to ack in the same transaction.',
     ],
-
   },
   'ops-declare': {
     lane: 'ops',
     match: 'ops-declare',
     title: 'Declare incident',
-    desc: 'Manual L1–L5 declaration. Polygon optional — uses draftPolygon centroid when present.',
+    desc: 'Manual incident declaration when ops wants to get ahead of citizens: severity, kind, optional polygon area.',
     comments: [
-      'Severity ≥ 4 fires an urgent notification to citizens + responders + ops.',
+      'Severity ≥ 4 raises an urgent push to citizens, responders, and ops together.',
     ],
-
   },
   'ops-copilot': {
     lane: 'ops',
     match: 'ops-command-copilot',
     title: 'Command copilot',
-    desc: 'Sees the entire active CSOT — reports, SOS (with nearest ready responder), cases, sources, PSI.',
+    desc: 'An ops-side AI that watches the whole picture and suggests the next move — who to send where, what to broadcast.',
     comments: [
-      'Workspace: ops_command. Suggests dispatch + drafts broadcasts grounded in the live snapshot.',
-      'ETAs always m:ss via 35 km/h surface mix — never invented.',
+      'Context packet ships the live report queue + active SOS (each with nearest ready responder + real ETA) + cases + source health + PSI to the model.',
+      'Suggestions cite the data they came from; ETAs are derived (m:ss), never invented.',
     ],
-
+    ai: {
+      provider: 'OpenRouter',
+      model: 'Dev: minimax/minimax-m2.5 · Production: openai/gpt-5.5 (swap via OPENROUTER_MODEL)',
+      workspace: 'ops_command',
+      tools: ['live PSI (NEA)', 'rainfall (NEA)'],
+      fallback:
+        'When OpenRouter is unreachable, a deterministic responder summarises queue depth + PSI in the same shape.',
+    },
   },
   'ops-broadcast': {
     lane: 'ops',
     match: 'ops-broadcast',
     title: 'Broadcast',
-    desc: 'Audience scope + 40-char title + body. Polygon defines the geo target.',
+    desc: 'Compose a short, geo-bounded public message: title, body, audience scope (citizens only, or citizens + responders).',
     comments: [
-      'Shows polygon area in km² (shoelace) — no fabricated device count.',
+      'Reach is reported as polygon area, not a fake device count.',
     ],
-
   },
   'ops-sources': {
     lane: 'ops',
     match: 'ops-source-health',
     title: 'Source health',
-    desc: 'Every external provider with its current state (fresh / stale / down / not_configured / unavailable).',
+    desc: 'Status board for every external data provider Kampung Kaki depends on (NEA, OneMap, LTA, MOH, etc.).',
     comments: [
-      'Sources from /api/host/tools.js + NEA + OneMap layers all report into this view.',
-      'God Mode can flip states to demo degradation paths.',
+      'States: fresh · stale · down · shell_only · not_configured · unavailable. The Host AI server reads this same array — if a tool is down, the AI is told so and answers "unavailable".',
     ],
-
   },
   'ops-log': {
     lane: 'ops',
     match: 'ops-ops-activity-log',
     title: 'Activity log',
-    desc: 'Append-only system of record. Captures every action (incl. God Mode seeds, marked actor=godmode).',
+    desc: 'Append-only system of record. Every verify, dismiss, dispatch, declare, broadcast is captured for audit.',
     comments: [
-      'Same store as responder/citizen log — visibility scoped by ActionLog.visibleTo.',
+      'Visibility is per-role: citizens see citizen-relevant lines; ops sees everything.',
     ],
-
   },
 
-  // ── God Mode ─────────────────────────────────────────────────────
+  // ── God Mode (demo, not part of the production flow) ────────────
   'god-csot': {
     lane: 'godmode',
     match: 'godmode-csot',
-    title: 'CSOT clusters',
-    desc: 'Live counts per cluster (intake · incidents · operations · network · intel · presentation).',
+    title: 'CSOT inspector',
+    desc: 'Live counts per data cluster (citizen intake, incidents, operations, network, intel). Lets a presenter prove the map and the records match.',
     comments: [
-      'Mirrors state/relations.ts. Source of truth for the wireframe lane structure.',
+      'Read-only view of the in-memory store; same data the real screens read from.',
     ],
-
   },
   'god-seed': {
     lane: 'godmode',
     match: 'godmode-seed',
     title: 'Seed scenarios',
-    desc: 'Minor + major demo seeds, plus "send SOS as me" using the device GPS. Reset wipes everything.',
+    desc: 'Two preset demos (minor + major) plus "send SOS as me" so the pitch can show a real flow in seconds. Reset wipes the seeded state.',
     comments: [
-      'Major seed lands a critical fire + open medical SOS — drives the responder + ops pushes.',
+      'Seeds are tagged actor=godmode in the audit log so the demo never looks like real data.',
     ],
-
   },
   'god-sources': {
     lane: 'godmode',
     match: 'godmode-sources',
     title: 'Source state cycler',
-    desc: 'Click any source to cycle its state. Demonstrates honest UI degradation.',
+    desc: 'Click any data source to cycle its state (fresh → stale → down → not_configured). Demonstrates how the UI degrades honestly when a provider goes dark.',
     comments: [
-      'Same SourceHealth array the ops surface reads — single CSOT mutation.',
+      'Same source list ops sees. Useful for the "what happens when NEA goes down?" pitch beat.',
     ],
-
   },
   'god-matrix': {
     lane: 'godmode',
     match: 'godmode-ai-matrix',
     title: 'AI dispatch matrix',
-    desc: 'Role × workspace → system prompt mapping for the Host AI.',
+    desc: 'Lists every role × workspace → system-prompt pairing the Host AI supports, so the team can audit which screens talk to the model and how.',
     comments: [
-      'Mirrors api/host/systemPrompts.js. Five real modes + back-compat aliases.',
+      'Five active modes: citizen_alert · citizen_assistant · responder_case · responder_mission · ops_command.',
     ],
-
   },
   'god-seeded': {
     lane: 'godmode',
     match: 'godmode-csot-seeded',
-    title: 'CSOT after major seed',
-    desc: 'Same CSOT tab after a major seed — counts move, source health remains honest.',
+    title: 'CSOT after seed',
+    desc: 'The CSOT inspector right after a major seed — counts move, source health stays honest. The proof that "shared truth" is one store, not five.',
     comments: [
-      'Useful for the pitch: shows the cluster relations animate with a single click.',
+      'Pitch beat: open this side-by-side with the citizen, responder, and ops home tabs and seed something new.',
     ],
-
   },
 };
 
@@ -376,14 +390,14 @@ const LANES = [
     title: '2 · Citizen',
     blurb: 'Map → briefing → alerts → report → SOS. AI Kaki is an on-demand side branch from home.',
     wrapEvery: 4,
-    order: ['cz-home', 'cz-brief', 'cz-alerts', 'cz-report', 'cz-sos', 'cz-sos-live', 'cz-ai'],
+    order: ['cz-home', 'cz-band', 'cz-brief', 'cz-alerts', 'cz-report', 'cz-sos', 'cz-sos-live', 'cz-ai'],
   },
   {
     id: 'responder',
     title: '3 · Responder',
     blurb: 'Home → mission board → join → copilot. Groups, events, log are side surfaces.',
     wrapEvery: 4,
-    order: ['rp-home', 'rp-mboard', 'rp-join', 'rp-copilot', 'rp-groups', 'rp-events', 'rp-log'],
+    order: ['rp-home', 'rp-band', 'rp-mboard', 'rp-join', 'rp-copilot', 'rp-groups', 'rp-events', 'rp-log'],
   },
   {
     id: 'ops',
@@ -406,8 +420,9 @@ const LANES = [
   },
   {
     id: 'godmode',
-    title: '5 · God Mode (demo dock)',
-    blurb: 'CSOT inspector → seed scenarios → source state cycler → AI matrix → CSOT after seed.',
+    kind: 'demo',
+    title: 'D · God Mode · demo dock (not in production)',
+    blurb: 'Presenter-only tooling, off by default, lives outside the real user journey. Seeds scenarios, flips source states, swaps roles — so a pitch can drive the citizen / responder / ops flows without waiting for live data.',
     wrapEvery: 4,
     order: ['god-csot', 'god-seed', 'god-sources', 'god-matrix', 'god-seeded'],
   },
@@ -474,17 +489,31 @@ async function main() {
         ? `<img src="${await asDataUri(file)}" alt="${escape(s.title)}" />`
         : `<div class="placeholder">missing ${s.match}</div>`;
       const comments = s.comments.map((c) => `<li>${escape(c)}</li>`).join('');
+      const aiBlock = s.ai
+        ? `<aside class="ai-credit">
+            <strong>AI · ${escape(s.ai.provider)}</strong>
+            <dl>
+              <dt>Model</dt><dd>${escape(s.ai.model)}</dd>
+              <dt>Prompt</dt><dd><code>${escape(s.ai.workspace)}</code></dd>
+              <dt>Live tools</dt><dd>${s.ai.tools.map((t) => `<span class="pill">${escape(t)}</span>`).join(' ')}</dd>
+              <dt>Fallback</dt><dd>${escape(s.ai.fallback)}</dd>
+            </dl>
+          </aside>`
+        : '';
+      const wideClass = s.wide ? ' wide' : '';
       cards.push(`
-        <article class="screen" id="${id}" style="grid-column:${col};grid-row:${row}">
-          <header><span class="num">${id}</span><h3>${escape(s.title)}</h3></header>
+        <article class="screen${wideClass}" id="${id}" style="grid-column:${col};grid-row:${row}">
+          <header><span class="num">${id}</span><h3>${escape(s.title)}</h3>${s.ai ? '<span class="ai-tag">AI</span>' : ''}</header>
           ${img}
           <p class="desc">${escape(s.desc)}</p>
           ${comments ? `<ul class="comments">${comments}</ul>` : ''}
+          ${aiBlock}
         </article>
       `);
     }
+    const isDemo = lane.kind === 'demo';
     return `
-      <section class="lane lane-${lane.id}" data-lane="${lane.id}">
+      <section class="lane lane-${lane.id} ${isDemo ? 'lane-demo' : ''}" data-lane="${lane.id}">
         <header class="lane-head">
           <h2><span class="lane-pill">${escape(lane.title)}</span></h2>
           <p>${escape(lane.blurb)}</p>
@@ -647,8 +676,8 @@ async function main() {
       box-shadow: 4px 4px 0 var(--ink);
       display: flex; flex-direction: column;
       position: relative;
-      width: 300px;
-      flex: 0 0 300px;
+      width: 360px;
+      flex: 0 0 360px;
     }
     /* Short forward arrow between consecutive tiles in the same row. */
     .screen + .screen::before {
@@ -698,11 +727,33 @@ async function main() {
       letter-spacing: 0.02em;
     }
     .screen img {
-      width: 100%; height: 260px; object-fit: cover; object-position: top center;
+      width: 100%; height: auto; max-height: 460px; object-fit: contain; object-position: top center;
       border-bottom: 1.5px solid var(--ink);
       display: block;
       background: var(--paper-2);
     }
+
+    /* Wide tiles (e.g. the in-app horizontal band) take the full lane width so
+       the captured strip renders at readable scale. */
+    .screen.wide {
+      width: 100%;
+      flex-basis: 100%;
+    }
+    .screen.wide img {
+      max-height: none;
+      object-fit: fill;
+    }
+    .screen.wide .desc,
+    .screen.wide .comments,
+    .screen.wide .ai-credit {
+      max-width: 80ch;
+    }
+    /* Wide tile sits on its own row inside the flex flow; no arrow before it
+       and no arrow after the previous tile pointing at it. */
+    .screen.wide::before,
+    .screen.wide::after,
+    .screen.wide + .screen::before,
+    .screen.wide + .screen::after { display: none; }
     .placeholder {
       width: 100%; height: 180px;
       background: repeating-linear-gradient(45deg, transparent 0 8px, rgba(0,0,0,0.04) 8px 16px);
@@ -724,6 +775,190 @@ async function main() {
       color: #555;
     }
     .screen .comments li { margin-bottom: 2px; }
+
+    .ai-tag {
+      margin-left: auto;
+      background: var(--ink);
+      color: var(--accent);
+      font-size: 9px;
+      font-weight: 900;
+      letter-spacing: 0.14em;
+      padding: 2px 6px;
+      border: 1.5px solid var(--ink);
+    }
+    .ai-credit {
+      margin: 8px 10px 10px;
+      border: 1.5px dashed var(--ink);
+      background: var(--paper-2);
+      padding: 8px 10px;
+      font-size: 10.5px;
+      line-height: 1.4;
+    }
+    .ai-credit strong {
+      display: block;
+      font-size: 9.5px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      margin-bottom: 5px;
+      color: var(--ink);
+    }
+    .ai-credit dl {
+      margin: 0;
+      display: grid;
+      grid-template-columns: 72px 1fr;
+      gap: 3px 8px;
+    }
+    .ai-credit dt {
+      font-size: 9px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: #666;
+    }
+    .ai-credit dd { margin: 0; font-size: 10.5px; }
+    .ai-credit code {
+      font-family: ui-monospace, monospace;
+      font-size: 10px;
+      background: var(--paper);
+      border: 1px solid var(--ink);
+      padding: 0 4px;
+    }
+    .ai-credit .pill {
+      display: inline-block;
+      background: var(--paper);
+      border: 1px solid var(--ink);
+      padding: 1px 6px;
+      font-size: 9.5px;
+      margin: 1px 2px 1px 0;
+    }
+
+    .band {
+      display: grid;
+      grid-template-columns: 0.85fr 1.15fr;
+      gap: 24px;
+      margin-bottom: 32px;
+    }
+    .band-col {
+      border: 2.5px solid var(--ink);
+      background: var(--paper);
+      box-shadow: 8px 8px 0 var(--ink);
+      padding: 16px 20px;
+    }
+    .band-col header h2 {
+      margin: 0 0 4px;
+      font-size: 14px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      font-weight: 900;
+    }
+    .band-sub {
+      display: inline-block;
+      margin-left: 8px;
+      font-size: 10px;
+      letter-spacing: 0.08em;
+      color: #555;
+      text-transform: none;
+      font-weight: 700;
+    }
+    .band-col header p { margin: 0 0 12px; font-size: 11.5px; color: #444; line-height: 1.5; }
+    .band-col header p code {
+      font-family: ui-monospace, monospace;
+      font-size: 10.5px;
+      background: var(--paper-2);
+      border: 1px solid var(--ink);
+      padding: 0 4px;
+    }
+
+    .prov { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+    .prov li {
+      border: 1.5px solid var(--ink);
+      background: var(--paper-2);
+      padding: 6px 8px;
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 2px;
+    }
+    .prov-name {
+      font-size: 11px;
+      font-weight: 900;
+      letter-spacing: 0.04em;
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .prov-meta {
+      font-family: ui-monospace, monospace;
+      font-size: 9.5px;
+      font-weight: 700;
+      color: #666;
+      background: var(--paper);
+      border: 1px solid var(--ink);
+      padding: 1px 6px;
+      letter-spacing: 0;
+    }
+    .prov-where { font-size: 10.5px; color: #444; line-height: 1.4; }
+
+    .bot-grid { display: grid; gap: 10px; }
+    .bot {
+      border: 1.5px solid var(--ink);
+      background: var(--paper-2);
+      padding: 8px 10px;
+      border-left: 5px solid var(--ink);
+    }
+    .bot strong {
+      display: block;
+      font-size: 12px;
+      font-weight: 900;
+      margin-bottom: 4px;
+    }
+    .bot .for {
+      display: inline-block;
+      margin-left: 6px;
+      padding: 1px 6px;
+      background: var(--accent);
+      border: 1px solid var(--ink);
+      font-size: 9px;
+      font-weight: 800;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+    .bot p { margin: 2px 0; font-size: 11px; line-height: 1.45; }
+    .bot .bot-meta { font-size: 10px; color: #555; }
+    .bot .bot-meta code {
+      font-family: ui-monospace, monospace;
+      font-size: 9.5px;
+      background: var(--paper);
+      border: 1px solid var(--ink);
+      padding: 0 4px;
+      margin: 0 1px;
+    }
+    .bot-cz { border-left-color: #2563eb; }
+    .bot-rp { border-left-color: #22c55e; }
+    .bot-ops { border-left-color: #dc2626; }
+
+    .lane-demo {
+      border-style: dashed;
+      box-shadow: 6px 6px 0 var(--accent), 6px 6px 0 1px var(--ink);
+      background: repeating-linear-gradient(135deg, var(--paper) 0 18px, var(--paper-2) 18px 19px);
+    }
+    .lane-demo .lane-head {
+      background: var(--accent);
+      border-bottom-style: dashed;
+    }
+    .lane-demo .lane-pill {
+      box-shadow: 3px 3px 0 #fff;
+    }
+    .lane-demo .lane-head::after {
+      content: 'NOT PART OF PRODUCTION USER JOURNEY';
+      display: inline-block;
+      margin-left: 10px;
+      padding: 2px 8px;
+      font-size: 9.5px;
+      font-weight: 900;
+      letter-spacing: 0.14em;
+      background: var(--ink);
+      color: var(--paper);
+      vertical-align: middle;
+    }
 
 
     footer.matrix {
@@ -792,33 +1027,28 @@ async function main() {
   <header class="hero">
     <div>
       <h1>Kampung Kaki · Wireframe</h1>
-      <p class="tagline">A live, role-aware map of Singapore for citizens, responders, and operations. One map · three views · shared truth.</p>
+      <p class="tagline">A live, role-aware map of Singapore for everyday people, trained responders, and operations staff. One map, three views, one shared truth.</p>
       <div class="meta">
         <span>CODE_EXP 2026</span>
-        <span>Section 2 · Shell</span>
-        <span>OneMap SG · NEA live · OneMap themes</span>
-        <span>Host AI · 5 role/workspace modes</span>
+        <span>Citizen · Responder · Ops</span>
+        <span>Real OneMap SG basemap</span>
+        <span>Live NEA / OneMap / LTA data</span>
       </div>
-      <p style="font-size:11.5px;margin:0;line-height:1.5;">
-        The CSOT (single source of truth) is split into six clusters with explicit
-        relations — see <code>src/state/relations.ts</code>. Every UI surface below reads from those clusters; no
-        screen invents data. A presenter-only <strong>God Mode</strong> dock seeds demo state and flips source
-        health so a pitch can show degradation paths honestly.
+      <p style="font-size:12px;margin:0;line-height:1.55;">
+        Citizens get a clean, trustworthy view of what is happening near them and a one-tap SOS.
+        Trained responders see the same map with active calls, missions to join, and an AI copilot
+        that ranks the best mission for them. Operations staff get the full picture — incoming reports,
+        live distress calls, the responder roster, and tools to declare incidents and broadcast to the
+        public. Everything published to a citizen has been verified; nothing on the map is invented.
       </p>
     </div>
     <div class="clusters">
-      <h3>CSOT clusters</h3>
+      <h3>What each role sees</h3>
       <div class="cluster-grid">
-        <div><strong>intake</strong>Reports + SOS</div>
-        <div><strong>incidents</strong>Events + zones</div>
-        <div><strong>operations</strong>Cases + chat + responders</div>
-        <div><strong>network</strong>Users + groups + volunteer events</div>
-        <div><strong>intel</strong>Sources + NEA + logs + notifications</div>
-        <div><strong>presentation</strong>Shell + selection state</div>
-      </div>
-      <div class="legend">
-        <span><span class="swatch" style="background:var(--ink)"></span> flow within a lane</span>
-        <span>screens read from clusters; mutations route through actions</span>
+        <div><strong>Citizen</strong>Verified alerts near them. Report or send SOS in seconds.</div>
+        <div><strong>Responder</strong>Active SOS, ops-formed cases, joinable missions ranked by fit.</div>
+        <div><strong>Ops</strong>Triage, dispatch, declare, broadcast — with full audit trail.</div>
+        <div><strong>Shared truth</strong>One map; what one role does shows up for the others instantly.</div>
       </div>
     </div>
   </header>
@@ -826,25 +1056,40 @@ async function main() {
   ${lanesHtml.join('\n')}
 
   <footer class="matrix">
-    <h2>Host AI dispatch matrix</h2>
-    <div class="matrix-grid">
-      <div class="matrix-cell"><strong>citizen · alert</strong><code>citizen_alert</code><br/>Situation / Do now / If worse · 995 / 999 included for sev ≥ 3.</div>
-      <div class="matrix-cell"><strong>citizen · assistant</strong><code>citizen_assistant</code><br/>AI Kaki · general safety questions, ≤ 6 lines.</div>
-      <div class="matrix-cell"><strong>responder · case</strong><code>responder_case</code><br/>Slash-aware case-room copilot inside the lobby.</div>
-      <div class="matrix-cell"><strong>responder · mission</strong><code>responder_mission</code><br/>Mission-board copilot, fit × distance ranking.</div>
-      <div class="matrix-cell"><strong>ops · command</strong><code>ops_command</code><br/>Dispatch + declaration + broadcast suggestions.</div>
-    </div>
-    <div class="tools">
-      <strong style="font-size:10px;letter-spacing:0.1em;text-transform:uppercase;">Server-side tools</strong>
-      <div style="margin-top:6px">
-        <code>getLivePsi</code><code>getLiveRainfall</code><code>getNearestAed</code><code>getNearestHospital</code>
+    <h2>Design principles</h2>
+    <div class="matrix-grid" style="grid-template-columns: repeat(3, 1fr);">
+      <div class="matrix-cell">
+        <strong>One map, three views</strong>
+        Citizens, responders, and operations all stand on the same OneMap SG basemap with the same live overlays. What changes is who can see what, not which app you opened.
+      </div>
+      <div class="matrix-cell">
+        <strong>Verified by humans, broadcast by software</strong>
+        Citizens cannot push noise to the public map. Reports go to ops; only after a human verifies do they appear as incidents. SOS bypasses verification — that is the contract.
+      </div>
+      <div class="matrix-cell">
+        <strong>Honest about what is unknown</strong>
+        Distances, ETAs, and air-quality numbers come from real measurements. When a data source is down, the UI says so plainly instead of filling the gap with plausible-looking numbers.
       </div>
     </div>
-    <p class="note">
-      Anything outside this matrix says <em>unavailable</em> rather than invent. ETAs are derived from
-      <code>getDistanceKm(responder, target) ÷ 35 km/h</code>; SOS / report locations come from device GPS, never from a
-      hardcoded constant. Broadcast reach reports polygon area in km² because device-density isn't a live source yet.
-    </p>
+    <h2 style="margin-top:18px;">AI stack credits</h2>
+    <div class="matrix-grid" style="grid-template-columns: repeat(2, 1fr);">
+      <div class="matrix-cell">
+        <strong>Provider · model</strong>
+        OpenRouter, one serverless endpoint <code>/api/host/ask</code> serving every AI surface. Dev build runs <code>minimax/minimax-m2.5</code>; production switches to <code>openai/gpt-5.5</code> via <code>OPENROUTER_MODEL</code> (no code change).
+      </div>
+      <div class="matrix-cell">
+        <strong>Five role × workspace prompts</strong>
+        <code>citizen_alert</code> · <code>citizen_assistant</code> (AI Kaki) · <code>responder_case</code> (case-room slash bot) · <code>responder_mission</code> (Mission Copilot) · <code>ops_command</code> (Command Copilot). Each prompt is purpose-built and bounded.
+      </div>
+      <div class="matrix-cell">
+        <strong>Server-prefetched live tools</strong>
+        <code>getLivePsi</code> · <code>getLiveRainfall</code> · <code>getNearestAed</code> · <code>getNearestHospital</code>. Tools run before the model is called and their results are injected into the context — the model never invents PSI or AED locations.
+      </div>
+      <div class="matrix-cell">
+        <strong>Deterministic fallback</strong>
+        When OpenRouter is unreachable or returns an incomplete answer, the same endpoint replies in the same shape using only the tool results. The user sees consistent guidance whether or not the LLM is up.
+      </div>
+    </div>
   </footer>
 
   <!-- No arrow JS: tiles are laid out in order via flex-wrap;

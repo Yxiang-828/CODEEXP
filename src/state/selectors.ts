@@ -91,9 +91,7 @@ export function selectCurrentMission(args: {
   events: CanonicalEvent[];
 }): MissionTarget | null {
   const sos = args.sosSessions.find(
-    (s) =>
-      s.assignedResponderId === args.selfResponderId &&
-      !['resolved', 'cancelled'].includes(s.status),
+    (s) => (s.memberCount ?? 0) > 0 && !['resolved', 'cancelled'].includes(s.status),
   );
   if (sos) {
     return {

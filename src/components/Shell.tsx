@@ -1,51 +1,50 @@
-import TopChrome from './layout/TopChrome';
-import LeftRail from './layout/LeftRail';
-import MapCanvas from './map/MapCanvas';
-import GlobalActionDock from './layout/GlobalActionDock';
-import WorkspaceDrawer from './layout/WorkspaceDrawer';
-import BottomStrip from './layout/BottomStrip';
-import TrackingPill from './primitives/TrackingPill';
-import DemoLogin from './DemoLogin';
-import PermissionPrompt from './PermissionPrompt';
-import GodMode from './GodMode';
+import { lazy, Suspense } from 'react';
+import Join from './Join';
+import Profile from './Profile';
+import ResponderControls from './ResponderControls';
+import CivilianSos from './CivilianSos';
+import ResponderSos from './ResponderSos';
+import ReportIssue from './ReportIssue';
+import OpsConsole from './OpsConsole';
+import OpsActions from './OpsActions';
+import Alerts from './Alerts';
+import AgentHub from './AgentHub';
 import { useAppContext } from '../AppContext';
-import useGpsTracking from '../hooks/useGpsTracking';
+
+// MapLibre GL is the heaviest dependency — split it into its own chunk that
+// loads once you're past the role screen.
+const MapCanvas = lazy(() => import('./map/MapCanvas'));
+
+function MapLoading() {
+  return (
+    <div className="absolute inset-0 flex items-center justify-center bg-surface-1">
+      <span className="text-[10px] uppercase tracking-widest font-bold text-text-secondary animate-pulse">
+        Loading map
+      </span>
+    </div>
+  );
+}
 
 export default function Shell() {
   const { isAuthenticated } = useAppContext();
-  if (!isAuthenticated) return <DemoLogin />;
-  return <ShellInner />;
-}
+  if (!isAuthenticated) return <Join />;
 
-function ShellInner() {
-  const { liveTracking, setSelfLocation, setLiveTracking, role, selfResponderId, updateResponderLocation } = useAppContext();
-
-  useGpsTracking({
-    enabled: liveTracking,
-    onLocation: (loc) => {
-      setSelfLocation(loc);
-      if (role === 'responder') updateResponderLocation(selfResponderId, loc);
-    },
-    onError: () => setLiveTracking(false),
-  });
-
+  // Every role lands on the same thing for now: the live map. Features get
+  // layered back in one at a time.
   return (
-    <div className="flex flex-col h-screen w-screen overflow-hidden bg-surface-0 font-sans">
-      <TopChrome />
-      <div className="flex flex-1 overflow-hidden relative min-h-0">
-        <LeftRail />
-        <main className="flex-1 relative flex flex-col min-w-0 min-h-0">
-          <div className="flex-1 relative min-h-0">
-            <MapCanvas />
-            <TrackingPill />
-            <GlobalActionDock />
-          </div>
-          <BottomStrip />
-        </main>
-        <WorkspaceDrawer />
-      </div>
-      <PermissionPrompt />
-      <GodMode />
+    <div className="relative h-screen w-screen overflow-hidden bg-surface-0">
+      <Suspense fallback={<MapLoading />}>
+        <MapCanvas />
+      </Suspense>
+      <ResponderControls />
+      <CivilianSos />
+      <ResponderSos />
+      <ReportIssue />
+      <OpsConsole />
+      <OpsActions />
+      <Alerts />
+      <AgentHub />
+      <Profile />
     </div>
   );
 }

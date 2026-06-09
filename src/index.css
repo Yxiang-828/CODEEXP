@@ -145,14 +145,24 @@ body {
   display: none;
 }
 
+/* Hospital = red circle + white cross (universal A&E symbol). */
 .qa-poi-hospital > span {
-  background: #0EA5E9;
-  color: #F4F4F1;
+  background: #DC2626;
+  color: #FFFFFF;
+  border-radius: 50%;
+  width: 28px;
+  height: 28px;
+  border-color: #FFFFFF;
 }
 
+/* AED = green circle (defib / rescue item). */
 .qa-poi-aed > span {
-  background: #10B981;
-  color: #F4F4F1;
+  background: #16A34A;
+  color: #FFFFFF;
+  border-radius: 50%;
+  width: 28px;
+  height: 28px;
+  border-color: #FFFFFF;
 }
 
 .qa-poi-warning > span {
@@ -197,5 +207,61 @@ body {
   .qa-brief-btn {
     min-width: 32px;
     justify-content: center;
+  }
+}
+
+@keyframes kkpulse {
+  0% { transform: scale(1); opacity: 0.45; }
+  100% { transform: scale(2.6); opacity: 0; }
+}
+
+@keyframes kk-demo-title-backdrop {
+  0% { opacity: 0; }
+  10%, 82% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+@keyframes kk-demo-title-card {
+  0% { opacity: 0; transform: translateY(22px) scale(0.96); filter: blur(5px); }
+  12% { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
+  82% { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
+  100% { opacity: 0; transform: translateY(-12px) scale(1.02); filter: blur(3px); }
+}
+
+@keyframes kkDemoFocusPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(241, 207, 84, 0.5); }
+  50% { box-shadow: 0 0 0 5px rgba(241, 207, 84, 0); }
+}
+
+@keyframes kkDemoShake {
+  0% { transform: scale(1.04) translate3d(0, 0, 0); filter: saturate(0.9) contrast(1.1); }
+  12% { transform: scale(1.055) translate3d(-7px, 3px, 0); }
+  23% { transform: scale(1.052) translate3d(6px, -2px, 0); }
+  35% { transform: scale(1.06) translate3d(-4px, 5px, 0); }
+  48% { transform: scale(1.052) translate3d(5px, 2px, 0); }
+  64% { transform: scale(1.055) translate3d(-3px, -3px, 0); }
+  82% { transform: scale(1.045) translate3d(2px, 1px, 0); opacity: 1; }
+  100% { transform: scale(1.04) translate3d(0, 0, 0); opacity: 0; filter: saturate(0.8) contrast(1.05); }
+}
+
+.kk-demo-title-backdrop {
+  animation: kk-demo-title-backdrop 3400ms cubic-bezier(0.23, 1, 0.32, 1) both;
+}
+
+.kk-demo-title-card {
+  animation: kk-demo-title-card 3400ms cubic-bezier(0.23, 1, 0.32, 1) both;
+  will-change: transform, opacity, filter;
+}
+
+.kk-demo-focus-pulse {
+  animation: kkDemoFocusPulse 2.8s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kk-demo-title-backdrop,
+  .kk-demo-title-card {
+    animation-name: kk-demo-title-backdrop;
+    transform: none;
+    filter: none;
   }
 }
