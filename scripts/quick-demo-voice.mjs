@@ -8,7 +8,10 @@
  * Usage:
  *   node scripts/quick-demo-voice.mjs
  *   node scripts/quick-demo-voice.mjs --render
- *   node scripts/quick-demo-voice.mjs --render --scene=qs-intro
+ *   node scripts/quick-demo-voice.mjs --render --force
+ *
+ * Qwen Base (ref-wav clone) has no speech-rate flag — tempo is natural model output.
+ * Do not speed up in the browser; that desyncs captions from audio duration.
  */
 import { spawnSync } from 'node:child_process';
 import { closeSync, openSync } from 'node:fs';

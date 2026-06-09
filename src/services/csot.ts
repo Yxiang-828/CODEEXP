@@ -342,6 +342,17 @@ class Csot {
 
 export const csot = new Csot();
 
+let demoQuickJoinImpl: ((name: string, role: string) => void) | null = null;
+
+/** Showcase director calls this via iframe window.__kkDemo.quickJoin. */
+export function registerDemoQuickJoin(fn: ((name: string, role: string) => void) | null) {
+  demoQuickJoinImpl = fn;
+}
+
+export function demoQuickJoinReady() {
+  return demoQuickJoinImpl !== null;
+}
+
 declare global {
   interface Window {
     __kkDemo?: {
@@ -349,6 +360,9 @@ declare global {
       topicCount: (prefix: string) => number;
       setTransportOnline: (online: boolean) => void;
       shutdown: () => void;
+      /** Embedded showcase: sign in without puppeting the Join UI. */
+      quickJoin?: (name: string, role: string) => void;
+      quickJoinReady?: () => boolean;
     };
   }
 }
@@ -359,5 +373,10 @@ if (typeof window !== 'undefined' && DEMO_SESSION_ID) {
     topicCount: (prefix) => csot.collectionByPrefix(prefix).length,
     setTransportOnline: (online) => csot.setDemoTransportOnline(online),
     shutdown: () => csot.demoShutdown(),
+    quickJoin: (name, role) => {
+      if (!demoQuickJoinImpl) throw new Error('Demo client still starting — try again in a moment.');
+      demoQuickJoinImpl(name, role);
+    },
+    quickJoinReady: () => demoQuickJoinReady(),
   };
 }

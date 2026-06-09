@@ -45,6 +45,8 @@ type DemoMapWindow = Window & {
     ) => { x: number; y: number; label: string; distanceKm: number } | null;
     responderMarkerCount: () => number;
     clearEvidence: () => void;
+    /** Demo automation: resolve an active map-pick at a fixed point (ops Declare). */
+    placeMapPick: (at: { lng: number; lat: number }) => void;
   };
 };
 
@@ -505,6 +507,10 @@ export default function MapCanvas() {
         demoPopupRef.current?.remove();
         demoPopupRef.current = null;
         restoreDemoSource();
+      },
+      placeMapPick: (at) => {
+        if (!mapPick.isRequesting()) mapPick.request();
+        mapPick.resolve(at);
       },
     };
     win.__kkMapDemo = api;

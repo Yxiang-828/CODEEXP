@@ -4,11 +4,14 @@ export type DemoWindow = Window & {
     topicCount: (prefix: string) => number;
     setTransportOnline: (online: boolean) => void;
     shutdown: () => void;
+    quickJoin?: (name: string, role: string) => void;
+    quickJoinReady?: () => boolean;
   };
   __kkAgent?: {
     replyCount: (agent: string) => number;
     lastReply: (agent: string) => string;
     busy: () => boolean;
+    conditionsReady?: () => boolean;
   };
   __kkMapDemo?: {
     focusLocation: (near: { lng: number; lat: number }, zoom?: number) => void;
@@ -18,7 +21,10 @@ export type DemoWindow = Window & {
       zoomOverride?: number,
     ) => { x: number; y: number; label: string; distanceKm: number } | null;
     clearEvidence: () => void;
+    placeMapPick?: (at: { lng: number; lat: number }) => void;
   };
+  /** Quick showcase: Bekal uses demoBekalFast.ts instead of POST /api/ai/ask. */
+  __kkDemoBekalFast?: boolean;
 };
 
 export const INCIDENT_LOCATION = { lng: 103.8644, lat: 1.3022 };

@@ -10,6 +10,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -17,7 +18,7 @@ import {
 } from 'react';
 import { fetchLiveSnapshot, type LiveSnapshot } from './services/live';
 import { askHostAi } from './services/hostAi';
-import { csot } from './services/csot';
+import { csot, registerDemoQuickJoin } from './services/csot';
 import { useCsotVersion } from './hooks/useCsot';
 import { getDistanceKm, etaMinutes } from './utils/geo';
 import { reverseGeocode } from './services/revgeocode';
@@ -434,6 +435,24 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     setShellState('S0');
     setTracking(null);
   };
+
+  // Embedded demo iframes: register sign-in before first paint so the director
+  // can call quickJoin as soon as clients load.
+  const joinRef = useRef(join);
+  joinRef.current = join;
+  const leaveRef = useRef(leave);
+  leaveRef.current = leave;
+  useLayoutEffect(() => {
+    const demoSession = new URLSearchParams(window.location.search).get('demoSession');
+    if (!demoSession) return;
+    registerDemoQuickJoin((name: string, nextRole: Role) => {
+      const trimmed = name.trim();
+      const id = csot.identity;
+      if (id && (id.name !== trimmed || id.role !== nextRole)) leaveRef.current();
+      joinRef.current(trimmed, nextRole);
+    });
+    return () => registerDemoQuickJoin(null);
+  }, []);
 
   // Push real GPS into the self responder's CSOT record so ops sees the true
   // position (and distance/ETA fit scores) of the person on the ground.
