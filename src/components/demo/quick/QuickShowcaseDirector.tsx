@@ -703,6 +703,7 @@ export default function QuickShowcaseDirector({ autostart, onExit }: { autostart
       await narrateWith('qs-pelita', 'Mei Ling', 'Before anything escalates, I ask Pelita, our conditions agent, how my area is looking near the M R T exit.', async () => {
         pelitaBefore = await startAsk('resident', 'Pelita', PELITA_PROMPT);
       });
+      await closeAiKaki('resident');
       await waitForAgentReply('resident', 'Pelita', pelitaBefore, [
         () => narrateWith('qs-conditions', 'Director', 'While Pelita thinks, the app pulls live readings from N E A and L T A, so rainfall and traffic light up right around Exit B.', async () => {
           await inspectLayer('resident', 'rainfall', 'Rainfall', 'Rainfall · NEA', 1200);
