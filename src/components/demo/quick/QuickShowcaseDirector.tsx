@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { MousePointer2, Pause, Play, Radio, ShieldCheck, Square, Timer, UserRound, X } from 'lucide-react';
 import type { DemoWindow } from './domPuppet';
 import { cleanText, DemoStopped, INCIDENT_LOCATION } from './domPuppet';
+import { BEKAL_DEMO_PROMPT } from '../../../demo/demoBekalFast';
 import {
   fadeOutIntroMusic,
   pauseDemoAudio,
@@ -9,7 +10,6 @@ import {
   playIntroMusic,
   playQuickVoice,
   playSfx,
-  QUICK_VOICE_PLAYBACK_RATE,
   resumeDemoAudio,
   resumeIntroMusic,
   stopIntroMusic,
@@ -58,8 +58,6 @@ const speakerProfile = (speaker: string) =>
 const rawSleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const PELITA_PROMPT = 'How is it looking around me right now near the MRT exit?';
-const BEKAL_PROMPT =
-  'Elderly man collapsed after e-bike smoke at Nicoll Highway MRT Exit B. I am the witness; he is the casualty. Which AED and A&E hospital should bystanders use, and what should I do while Aisha is coming?';
 
 export default function QuickShowcaseDirector({ autostart, onExit }: { autostart: boolean; onExit: () => void }) {
   const [phase, setPhase] = useState<Phase>('idle');
@@ -67,7 +65,7 @@ export default function QuickShowcaseDirector({ autostart, onExit }: { autostart
   const [loaded, setLoaded] = useState<Set<RoleKey>>(new Set());
   const [camera, setCamera] = useState<Camera>('resident');
   const [speaker, setSpeaker] = useState('Director');
-  const [caption, setCaption] = useState('A sixty-second live story across three roles on one map.');
+  const [caption, setCaption] = useState('Click Start to open three demo clients, then Start with sound.');
   const [chapter, setChapter] = useState('Ready');
   const [mark, setMark] = useState('00:00');
   const [error, setError] = useState<string | null>(null);
@@ -237,20 +235,9 @@ export default function QuickShowcaseDirector({ autostart, onExit }: { autostart
     return res.json() as Promise<T>;
   };
 
-  // Warm the local model so the demo-time agent replies come back quickly.
-  const prewarmAgents = () => {
-    for (const agent of ['pelita', 'bekal'] as const) {
-      void fetch(`${BRIDGE_URL}/api/ai/ask`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ agent, role: 'citizen', location: INCIDENT_LOCATION, message: 'warm up', history: [] }),
-      }).catch(() => {});
-    }
-  };
-
   // --- Narration: always plays the full Qwen line; never clamped by the deadline. ---
   const voiceFallbackMs = (text: string) =>
-    Math.min(8000, Math.max(2600, text.length * 52)) / QUICK_VOICE_PLAYBACK_RATE;
+    Math.min(8000, Math.max(2600, text.length * 52));
 
   const narrate = async (sceneId: string, nextSpeaker: string, text: string) => {
     setSpeaker(nextSpeaker);
@@ -297,20 +284,6 @@ export default function QuickShowcaseDirector({ autostart, onExit }: { autostart
     const id = ++cutsceneIdRef.current;
     setCutscene({ id, image, title, detail });
     await holdWait(fast ? 700 : holdMs);
-    setCutscene((c) => (c?.id === id ? null : c));
-    await wait(fast ? 40 : 140);
-  };
-
-  /** Hold a cutscene on screen while async work (usually voice) runs underneath. */
-  const flashCutsceneWhile = async (
-    image: string,
-    title: string,
-    detail: string,
-    during: () => Promise<unknown>,
-  ) => {
-    const id = ++cutsceneIdRef.current;
-    setCutscene({ id, image, title, detail });
-    await during();
     setCutscene((c) => (c?.id === id ? null : c));
     await wait(fast ? 40 : 140);
   };
@@ -410,9 +383,8 @@ export default function QuickShowcaseDirector({ autostart, onExit }: { autostart
     return before;
   };
 
-  // Productive wait: always runs the filler queue first (map layers, narration),
-  // then listens for the real reply. Bekal's demo prompt is prerecorded on the
-  // server, so the reply is usually already there once fillers finish.
+  // Productive wait: runs fillers while the reply lands (Bekal uses a fixed 4s
+  // prerecorded path when __kkDemoBekalFast is armed — no LLM round-trip).
   const waitForAgentReply = async (
     role: RoleKey,
     agentName: 'Pelita' | 'Bekal',
@@ -462,18 +434,144 @@ export default function QuickShowcaseDirector({ autostart, onExit }: { autostart
     else await moveCursor(role, chip);
   };
 
-  const login = async (role: RoleKey, opts?: { quiet?: boolean }) => {
+  const appRoleFor = (role: RoleKey) => (role === 'resident' ? 'citizen' : role);
+
+  const nameField = (role: RoleKey) =>
+    inputByPlaceholder(role, 'e.g.') ?? inputByPlaceholder(role, 'Mei Ling');
+
+  const profileButton = (role: RoleKey) =>
+    visible(frameDocument(role).querySelector('button[title="Your profile"]') as HTMLButtonElement);
+
+  const identityReady = (role: RoleKey, actor: (typeof actors)[RoleKey]) => {
+    const id = frameWindow(role).__kkDemo?.identity();
+    const appRole = appRoleFor(role);
+    return id?.name === actor.name && id?.role === appRole ? id : null;
+  };
+
+  const setupResponderProfile = async () => {
+    await click('responder', () => frameDocument('responder').querySelector('button[title="Your profile"]'), 'responder profile');
+    await ensureChip('responder', 'Medical');
+    await ensureChip('responder', 'Hazard');
+    await click('responder', () => button('responder', 'Save', true), 'save responder profile');
+    await closeSheet('responder', 'Profile');
+  };
+
+  type LoginOpts = { quiet?: boolean; ui?: boolean; paced?: boolean };
+
+  const loginOpenPicker = async (role: RoleKey, opts?: LoginOpts) => {
     const actor = actors[role];
-    if (!opts?.quiet) await switchCamera(role, `${actor.roleLabel} sign-in`, '00:00');
+    if (identityReady(role, actor) && profileButton(role)) return;
+    if (profileButton(role) && !identityReady(role, actor)) {
+      await click(role, () => profileButton(role), `${role} profile menu`);
+      await click(role, () => button(role, 'Log out', true), `${role} log out`);
+      await waitFor(() => button(role, 'Explore in demo mode'), `${role} welcome screen`, 15000);
+    }
     await click(role, () => button(role, 'Explore in demo mode'), `${role} demo mode`);
-    await waitFor(() => inputByPlaceholder(role, 'Mei Ling'), `${role} role picker`);
-    await fill(role, () => inputByPlaceholder(role, 'Mei Ling'), actor.name, `${role} name`);
-    const appRole = role === 'resident' ? 'citizen' : role;
+    await waitFor(() => nameField(role), `${role} role picker`);
+    if (opts?.paced) await holdWait(fast ? 120 : 900);
+  };
+
+  const loginFillName = async (role: RoleKey, opts?: LoginOpts) => {
+    const actor = actors[role];
+    if (identityReady(role, actor) && profileButton(role)) return;
+    await fill(role, () => nameField(role), actor.name, `${role} name`);
+    await waitFor(() => {
+      const field = nameField(role);
+      return field?.value === actor.name ? field : null;
+    }, `${role} name committed`);
+    if (opts?.paced) await holdWait(fast ? 120 : 1100);
+  };
+
+  const loginPickRole = async (role: RoleKey, opts?: LoginOpts) => {
+    const actor = actors[role];
+    const appRole = appRoleFor(role);
+    if (identityReady(role, actor) && profileButton(role)) return;
     await click(role, () => {
       const choice = frameDocument(role).querySelector<HTMLButtonElement>(`button[data-kk-role="${appRole}"]`);
       return choice && !choice.disabled ? visible(choice) : null;
     }, `${actor.roleLabel} role`);
-    await waitFor(() => visible(frameDocument(role).querySelector('button[title="Your profile"]') as HTMLButtonElement), `${role} map ready`, 30000);
+    await waitFor(() => identityReady(role, actor), `${role} identity minted`, 30000);
+    await waitFor(() => profileButton(role), `${role} map ready`, 30000);
+    if (opts?.paced) await holdWait(fast ? 80 : 360);
+  };
+
+  const login = async (role: RoleKey, opts?: LoginOpts) => {
+    const actor = actors[role];
+    const appRole = appRoleFor(role);
+    if (!opts?.quiet) await switchCamera(role, `${actor.roleLabel} sign-in`, '00:00');
+
+    if (identityReady(role, actor) && profileButton(role)) return;
+
+    const quickJoin = !opts?.ui ? frameWindow(role).__kkDemo?.quickJoin : undefined;
+    if (quickJoin) {
+      await waitFor(
+        () => (frameWindow(role).__kkDemo?.quickJoinReady?.() ? true : null),
+        `${role} demo client ready`,
+        15000,
+      );
+      quickJoin(actor.name, appRole);
+      await waitFor(() => identityReady(role, actor), `${role} identity minted`, 30000);
+      await waitFor(() => profileButton(role), `${role} map ready`, 30000);
+      return;
+    }
+
+    await loginOpenPicker(role, opts);
+    await loginFillName(role, opts);
+    await loginPickRole(role, opts);
+  };
+
+  const setupOpts = { ui: true, quiet: true, paced: true } as const;
+
+  /** 3-up sign-in — one phase per setup voice line (called from run). */
+  const loginAllRoles = async (phase: 'picker' | 'name' | 'role') => {
+    if (phase === 'picker') {
+      await Promise.all((['resident', 'responder', 'ops'] as RoleKey[]).map((role) => loginOpenPicker(role, setupOpts)));
+      return;
+    }
+    if (phase === 'name') {
+      await Promise.all((['resident', 'responder', 'ops'] as RoleKey[]).map((role) => loginFillName(role, setupOpts)));
+      return;
+    }
+    await Promise.all([
+      loginPickRole('resident', setupOpts),
+      loginPickRole('ops', setupOpts),
+      (async () => {
+        await loginPickRole('responder', setupOpts);
+        await setupResponderProfile();
+      })(),
+    ]);
+  };
+
+  const runOpsBeat = async () => {
+    frameWindow('ops').__kkMapDemo?.focusLocation(INCIDENT_LOCATION, 13.6);
+
+    await click('ops', () => button('ops', 'Declare'), 'ops declare');
+    await click('ops', () => button('ops', 'fire', true), 'declare fire kind');
+    await click('ops', () => button('ops', 'Warning', true), 'declare urgency');
+    await fill('ops', () => inputByPlaceholder('ops', 'Fallen tree'), 'Smoke at MRT Exit B', 'declare title');
+    await fill('ops', () => inputByPlaceholder('ops', 'Bishan'), 'Nicoll Highway MRT Exit B', 'declare area');
+    await fill(
+      'ops',
+      () => inputByPlaceholder('ops', 'What people should know'),
+      'E-bike burning at the covered walkway; thick smoke at the choke point.',
+      'declare note',
+    );
+    frameWindow('ops').__kkMapDemo?.placeMapPick?.(INCIDENT_LOCATION);
+    await wait(fast ? 80 : 180);
+    await click('ops', () => button('ops', 'Post notice', true), 'post fire notice');
+
+    await click('ops', () => button('ops', 'Broadcast', true), 'ops broadcast');
+    await click('ops', () => button('ops', 'Everyone', true), 'broadcast everyone');
+    await click('ops', () => button('ops', 'Emergency', true), 'broadcast urgency');
+    await fill('ops', () => inputByPlaceholder('ops', 'Bishan'), 'Nicoll Highway MRT Exit B', 'broadcast area');
+    await fill('ops', () => inputByPlaceholder('ops', 'Flash flood'), 'Avoid MRT Exit B smoke incident', 'broadcast message');
+    await fill(
+      'ops',
+      () => inputByPlaceholder('ops', 'What people should do'),
+      'Keep the covered walkway and access road clear for responders.',
+      'broadcast details',
+    );
+    await click('ops', () => button('ops', 'Send broadcast', true), 'send broadcast');
   };
 
   const seedScenario = async () => {
@@ -488,6 +586,7 @@ export default function QuickShowcaseDirector({ autostart, onExit }: { autostart
     setPaused(false);
     setPhase('preparing');
     setError(null);
+    setSessionId(null);
     setLoaded(new Set());
     setElapsedMs(0);
     deadlineRef.current = 0;
@@ -502,7 +601,6 @@ export default function QuickShowcaseDirector({ autostart, onExit }: { autostart
         method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ title: 'Quick AI Showcase' }),
       });
       setSessionId(start.sessionId);
-      prewarmAgents();
       setPhase('ready');
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
@@ -510,14 +608,38 @@ export default function QuickShowcaseDirector({ autostart, onExit }: { autostart
     }
   };
 
-  const cleanup = async () => {
+  const cleanup = async (outcome: 'done' | 'stopped' | 'error' = 'done', errMsg?: string) => {
     stopIntroMusic(true);
-    if (!sessionId) return;
-    setPhase('cleaning');
-    setChapter('Teardown');
-    (Object.keys(actors) as RoleKey[]).forEach((r) => { try { frameWindow(r).__kkDemo?.shutdown(); } catch { /* noop */ } });
-    await rawSleep(fast ? 100 : 400);
-    try { await api(`/api/demo/${sessionId}/cleanup`, { method: 'POST' }); } catch { /* non-fatal */ }
+    stopQwenScene();
+    const sid = sessionId;
+    if (sid) {
+      setPhase('cleaning');
+      setChapter('Teardown');
+      (Object.keys(actors) as RoleKey[]).forEach((r) => {
+        try {
+          const win = frameRefs.current[r]?.contentWindow as DemoWindow | null;
+          win?.__kkDemo?.shutdown();
+          if (win) delete win.__kkDemoBekalFast;
+        } catch { /* noop */ }
+      });
+      await rawSleep(fast ? 100 : 400);
+      try { await api(`/api/demo/${sid}/cleanup`, { method: 'POST' }); } catch { /* non-fatal */ }
+    }
+    setSessionId(null);
+    setLoaded(new Set());
+    setCamera('resident');
+    setCutscene(null);
+    setPresentationCard(null);
+    setTransitionStamp(null);
+    setCursor((c) => ({ ...c, visible: false }));
+    if (outcome === 'error') {
+      setChapter('Error');
+      setCaption(errMsg ? `Demo error: ${errMsg}` : 'Something went wrong during the showcase.');
+      setPhase('failed');
+      return;
+    }
+    setChapter(outcome === 'stopped' ? 'Stopped' : 'Finished');
+    setCaption(outcome === 'stopped' ? 'Demo stopped. Click Replay to run again.' : 'Demo complete. Click Replay to run again.');
     setPhase('complete');
   };
 
@@ -531,25 +653,27 @@ export default function QuickShowcaseDirector({ autostart, onExit }: { autostart
       void playIntroMusic(0.45);
       setChapter('Setting up the demo');
 
-      // Three short setup lines play while sign-in runs quietly off the resident camera.
-      const intro = (async () => {
-        await narrate('qs-setup-1', 'Director', 'Signing in a resident, a responder, and operations on one shared map.');
-        await narrate('qs-setup-2', 'Director', 'Narration uses Qwen three text-to-speech with custom reference voices.');
-        await narrate('qs-setup-3', 'Director', 'Our A I agents run on Ollama cloud MiniMax two point five models, and the stack will scale further.');
-      })();
-
-      await login('resident', { quiet: true });
-      await login('responder', { quiet: true });
-      await click('responder', () => frameDocument('responder').querySelector('button[title="Your profile"]'), 'responder profile');
-      await ensureChip('responder', 'Medical');
-      await ensureChip('responder', 'Hazard');
-      await click('responder', () => button('responder', 'Save', true), 'save responder profile');
-      await closeSheet('responder', 'Profile');
-      await login('ops', { quiet: true });
+      // 3-up sign-in phased to each setup line — maps only appear on the last beat.
+      await switchCamera('all', 'Signing in · three roles', '00:00');
+      await narrateWith(
+        'qs-setup-1',
+        'Director',
+        'Signing in a resident, a responder, and operations on one shared map.',
+        () => loginAllRoles('picker'),
+      );
+      await narrateWith(
+        'qs-setup-2',
+        'Director',
+        'Narration uses Qwen three text-to-speech with custom reference voices.',
+        () => loginAllRoles('name'),
+      );
+      await narrateWith(
+        'qs-setup-3',
+        'Director',
+        'Our A I agents run on Ollama cloud MiniMax two point five models, and the stack will scale further.',
+        () => loginAllRoles('role'),
+      );
       await switchCamera('resident', 'Ready', '00:00');
-      prewarmAgents();
-
-      await intro;
       fadeOutIntroMusic(700);
 
       // Clock starts now.
@@ -557,24 +681,28 @@ export default function QuickShowcaseDirector({ autostart, onExit }: { autostart
       runStartRef.current = Date.now();
       tickRef.current = window.setInterval(() => setElapsedMs(Math.min(RUN_BUDGET_MS, Date.now() - runStartRef.current)), 120);
 
-      // 1 — MRT cutscene + intro voice in parallel (no dead air after the stamp).
+      // 1 — MRT cutscene (fixed hold) while intro voice + caption run in parallel.
       await flashTransition('00:00', 'Smoke at Exit B', 'stamp');
-      await flashCutsceneWhile(
-        '/demo/cutscenes/mrt-ebike-fire.png',
-        'Smoke at M R T Exit B',
-        'Rain, e-bike smoke, a crowded choke point.',
-        () => narrate('qs-intro', 'Director', 'Here is one real KampungKaki session: a medical emergency across three live roles on a single shared map.'),
+      await narrateWith(
+        'qs-intro',
+        'Director',
+        'Here is one real KampungKaki session: a medical emergency across three live roles on a single shared map.',
+        () => flashCutscene('/demo/cutscenes/mrt-ebike-fire.png', 'Smoke at M R T Exit B', 'Rain, e-bike smoke, a crowded choke point.', 2200),
       );
 
       // 2 — Pelita + live conditions. Ask while Mei Ling speaks, show NEA/LTA layers
       // during the conditions line, then pop back to the real reply.
       await switchCamera('resident', 'Pelita · live conditions', '00:06');
       await flashTransition('00:06', 'Pelita · live conditions', 'page-flip');
+      await waitFor(
+        () => (frameWindow('resident').__kkAgent?.conditionsReady?.() ? true : null),
+        'resident conditions snapshot',
+        25000,
+      );
       let pelitaBefore = 0;
       await narrateWith('qs-pelita', 'Mei Ling', 'Before anything escalates, I ask Pelita, our conditions agent, how my area is looking near the M R T exit.', async () => {
         pelitaBefore = await startAsk('resident', 'Pelita', PELITA_PROMPT);
       });
-      await closeAiKaki('resident');
       await waitForAgentReply('resident', 'Pelita', pelitaBefore, [
         () => narrateWith('qs-conditions', 'Director', 'While Pelita thinks, the app pulls live readings from N E A and L T A, so rainfall and traffic light up right around Exit B.', async () => {
           await inspectLayer('resident', 'rainfall', 'Rainfall', 'Rainfall · NEA', 1200);
@@ -606,10 +734,11 @@ export default function QuickShowcaseDirector({ autostart, onExit }: { autostart
       void seedScenario();
       await flashCutscene('/demo/cutscenes/train-tunnel.png', 'Medical S O S sent', 'Hospitals, A E Ds, and responders lock to this point.', 1500);
 
-      // 5 — Bekal: show AED/hospital layers during the ask line, then return to pins.
+      // 5 — Bekal: prerecorded 4s reply + map pins (no LLM); layers during narration.
       await switchCamera('resident', 'Bekal · AED + hospital', '00:50');
       await flashTransition('00:50', 'Bekal · AED + hospital', 'chime');
-      const bekalBefore = await startAsk('resident', 'Bekal', BEKAL_PROMPT);
+      frameWindow('resident').__kkDemoBekalFast = true;
+      const bekalBefore = await startAsk('resident', 'Bekal', BEKAL_DEMO_PROMPT);
       await closeAiKaki('resident');
       await waitForAgentReply('resident', 'Bekal', bekalBefore, [
         () => narrateWith('qs-bekal', 'Director', 'Mei Ling asks Bekal which A E D and hospital to use, while the map confirms the nearest ones around the incident.', async () => {
@@ -617,19 +746,21 @@ export default function QuickShowcaseDirector({ autostart, onExit }: { autostart
           await inspectLayer('resident', 'hospitals', 'Hospital', 'A&E hospital', 1200);
         }),
         () => inspectLayer('resident', 'incidents', 'Traffic incident', 'Route traffic · LTA', 1200),
-      ], fast ? 8000 : 48000);
+      ], fast ? 6000 : 20000);
       await click('resident', () => button('resident', 'AI Kaki'), 'reopen AI Kaki');
       await wait(fast ? 120 : 400);
       await narrateWith('qs-bekal-reply', 'Director', 'Bekal returns the nearest A E D, an emergency hospital, and first-aid guidance, dropped onto the map as real pins.', () => holdWait(fast ? 400 : 1000));
       await closeAiKaki('resident');
 
-      // 6 — Ops verifies on the same map while Nadia speaks.
-      await switchCamera('ops', 'Ops · verify', '01:06');
-      await flashTransition('01:06', 'Ops · verify', 'page-flip');
-      await narrateWith('qs-ops', 'Nadia', 'I am Nadia in operations. I verify the same case and map evidence before I decide what to publish.', async () => {
-        frameWindow('ops').__kkMapDemo?.focusLocation(INCIDENT_LOCATION, 13.6);
-        await holdWait(fast ? 300 : 900);
-      });
+      // 6 — Ops: what Nadia actually runs (verify, declare, broadcast) — brief, not a tour.
+      await switchCamera('ops', 'Ops · command', '01:06');
+      await flashTransition('01:06', 'Ops · command', 'page-flip');
+      await narrateWith(
+        'qs-ops',
+        'Nadia',
+        'I am Nadia in ops. I verify reports on the shared map, declare notices, and broadcast warnings — I decide what is public and who gets sent.',
+        () => runOpsBeat(),
+      );
 
       // 7 — MQTT one-truth: 3-up view while the finale line plays.
       await switchCamera('all', 'MQTT · one truth', '01:14');
@@ -642,12 +773,18 @@ export default function QuickShowcaseDirector({ autostart, onExit }: { autostart
       await narrate('qs-outro', 'Director', 'That is KampungKaki: live map evidence, A I Kaki guidance, and coordinated response in about a minute.');
 
       stopQwenScene();
-      await cleanup();
+      await cleanup('done');
     } catch (caught) {
       const requestedStop = caught instanceof DemoStopped;
       const message = caught instanceof Error ? caught.message : String(caught);
       if (!requestedStop) setError(message);
-      try { await cleanup(); if (!requestedStop) setPhase('failed'); } catch { setPhase('failed'); }
+      try {
+        await cleanup(requestedStop ? 'stopped' : 'error', message);
+      } catch {
+        setSessionId(null);
+        setPhase('failed');
+        setCaption('Teardown failed. Click Replay to try again.');
+      }
     } finally {
       deadlineRef.current = 0;
       if (tickRef.current) { window.clearInterval(tickRef.current); tickRef.current = null; }
@@ -677,7 +814,7 @@ export default function QuickShowcaseDirector({ autostart, onExit }: { autostart
     if (!autostart || phase !== 'idle' || autostartPreparedRef.current) return;
     autostartPreparedRef.current = true;
     void prepare();
-  }, [autostart, phase]);
+  }, [autostart, phase]); // autostart only from ?autostart=1 — not the launcher button
 
   // Autostart only kicks off automatically in fast mode (no audio gate). Otherwise
   // the presenter clicks "Start with sound" so browser autoplay is satisfied.
@@ -721,17 +858,18 @@ export default function QuickShowcaseDirector({ autostart, onExit }: { autostart
   const ringCirc = 2 * Math.PI * 42;
   const currentSpeaker = speakerProfile(speaker);
   const overlayActive = Boolean(cutscene || presentationCard);
+  const captionHidden = Boolean(presentationCard);
   const focusRole: RoleKey = camera === 'all' ? 'resident' : camera;
   const aiPanelOpen = aiKakiOpen(focusRole);
   const canStart = phase === 'ready' && loaded.size >= 3;
 
   return (
     <main className="kk-quick-root relative h-screen w-screen overflow-hidden bg-[#12110e] text-[#f4f0e6]"
-      style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace' }}>
+      style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace', backgroundColor: '#12110e', color: '#f4f0e6' }}>
       {/* Iframe region — fills the area ABOVE the caption bar exactly. The iframe
           is never scaled past the region, so the bar can never clip or cover the
           live webapp's own bottom controls. */}
-      <div className="absolute inset-x-0 top-0 overflow-hidden bg-[#d8d4ca]" style={{ bottom: 'max(13vh, 104px)' }}>
+      <div className="absolute inset-x-0 top-0 overflow-hidden" style={{ bottom: 'max(13vh, 104px)', backgroundColor: sessionId ? '#d8d4ca' : '#12110e' }}>
         {sessionId ? (
           (Object.keys(actors) as RoleKey[]).map((role, index) => {
             const all = camera === 'all';
@@ -757,7 +895,18 @@ export default function QuickShowcaseDirector({ autostart, onExit }: { autostart
             );
           })
         ) : (
-          <div className="flex h-full items-center justify-center text-[11px] uppercase tracking-[0.24em] text-[#14120f]/50">Preparing session…</div>
+          <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center" style={{ color: 'rgba(244,240,230,0.72)' }}>
+            <p className="text-[11px] font-black uppercase tracking-[0.24em]">
+              {phase === 'preparing' ? `Opening session… (${loaded.size}/3 clients)` : phase === 'complete' || phase === 'failed' ? 'Click Replay in the bar below' : 'Press Start in the bar below'}
+            </p>
+            {phase === 'preparing' ? (
+              <p className="text-[10px] uppercase tracking-[0.14em] opacity-70">Signing in resident, responder, and ops</p>
+            ) : phase === 'complete' || phase === 'failed' ? (
+              <p className="text-[10px] uppercase tracking-[0.14em] opacity-70">Three fresh clients load on the next run</p>
+            ) : (
+              <p className="text-[10px] uppercase tracking-[0.14em] opacity-70">Three live clients will appear here</p>
+            )}
+          </div>
         )}
 
         {/* Cursor live over the iframe region. */}
@@ -807,9 +956,9 @@ export default function QuickShowcaseDirector({ autostart, onExit }: { autostart
         )}
       </div>
 
-      {/* Persistent caption + control bar (always reserved, fades only behind a full card/cutscene). */}
-      <footer className={`absolute inset-x-0 bottom-0 z-[80] border-t-4 border-[#14120f] bg-[#14120f] text-[#f4f0e6] transition-opacity duration-150 ${overlayActive ? 'opacity-0' : 'opacity-100'}`}
-        style={{ height: 'max(13vh, 104px)' }}>
+      {/* Persistent caption + control bar — stays visible during cutscenes so voice stays readable. */}
+      <footer className={`absolute inset-x-0 bottom-0 z-[80] border-t-4 border-[#14120f] bg-[#14120f] text-[#f4f0e6] transition-opacity duration-150 ${captionHidden ? 'opacity-0' : 'opacity-100'}`}
+        style={{ height: 'max(13vh, 104px)', backgroundColor: '#14120f', color: '#f4f0e6' }}>
         <div className="flex h-full items-center gap-4 px-4 py-3">
           <div className="relative h-[84px] w-[84px] shrink-0">
             <svg viewBox="0 0 96 96" className="h-full w-full -rotate-90">

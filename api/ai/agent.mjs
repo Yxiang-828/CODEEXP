@@ -13,15 +13,23 @@ const OLLAMA_URL = (process.env.OLLAMA_BASE_URL?.replace(/\/v1\/?$/, '') ?? 'htt
 const MODEL = process.env.KK_AI_MODEL ?? 'minimax-m2.5:cloud';
 const MAX_ROUNDS = 4;
 
-async function ollamaChat(messages, tools) {
-  const res = await fetch(OLLAMA_URL, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ model: MODEL, stream: false, messages, tools, options: { temperature: 0.3 } }),
-    signal: AbortSignal.timeout(60_000),
-  });
-  if (!res.ok) throw new Error(`ollama HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
-  return (await res.json()).message;
+async function ollamaChat(messages, tools, attempt = 0) {
+  try {
+    const res = await fetch(OLLAMA_URL, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model: MODEL, stream: false, messages, tools, options: { temperature: 0.3 } }),
+      signal: AbortSignal.timeout(60_000),
+    });
+    if (!res.ok) throw new Error(`ollama HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
+    return (await res.json()).message;
+  } catch (err) {
+    const msg = String(err?.message ?? err);
+    if (attempt < 1 && msg.includes('timeout')) {
+      return ollamaChat(messages, tools, attempt + 1);
+    }
+    throw err;
+  }
 }
 
 /**

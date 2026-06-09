@@ -4,6 +4,7 @@ import { useAppContext } from '../AppContext';
 import { askAgent, type AgentMark } from '../services/agents';
 import { bekalDirectives } from '../state/bekalDirectives';
 import { conditionsStore } from '../state/conditionsStore';
+import { demoBekalFastReply } from '../demo/demoBekalFast';
 
 const RESOLVED = ['resolved', 'cancelled'];
 type AgentId = 'pelita' | 'bekal' | 'pondok';
@@ -63,6 +64,10 @@ export default function AgentHub() {
         return '';
       },
       busy: () => busy,
+      conditionsReady: () => {
+        const snap = conditionsStore.getAgentSnapshot();
+        return !!(snap && Array.isArray(snap.layers) && snap.layers.length > 0);
+      },
     };
     return () => { if (w.__kkAgent) delete w.__kkAgent; };
   }, [threads, busy]);
@@ -78,6 +83,20 @@ export default function AgentHub() {
     setThreads((t) => ({ ...t, [active]: [...(t[active] ?? []), { role: 'user', content: text }] }));
     setInput('');
     setBusy(true);
+
+    const w = window as Window & { __kkDemoBekalFast?: boolean };
+    const demoFast = active === 'bekal' && w.__kkDemoBekalFast ? demoBekalFastReply(text) : null;
+    if (demoFast) {
+      await new Promise((resolve) => setTimeout(resolve, demoFast.delayMs));
+      setThreads((t) => ({
+        ...t,
+        [active]: [...(t[active] ?? []), { role: 'assistant', content: demoFast.reply, marks: demoFast.directives }],
+      }));
+      if (demoFast.directives.length > 0) bekalDirectives.set(demoFast.directives);
+      setBusy(false);
+      return;
+    }
+
     const location = active === 'bekal' ? (activeSos?.location ?? selfLocation ?? null) : selfLocation ?? null;
     // 1-to-1 channel: the agent always knows WHO it's helping (profile + aid card
     // + GPS) so it can be specific. Plus the conditions snapshot the map already

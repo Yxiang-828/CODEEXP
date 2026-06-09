@@ -11,8 +11,6 @@ export { pauseDemoAudio, resumeDemoAudio, stopQwenScene, unlockDemoAudio };
 export type QuickSfx = 'stamp' | 'whoosh' | 'chime' | 'page-flip';
 
 const QUICK_VOICE_BASE = '/demo/voice/quick';
-/** Slightly faster narration keeps the quick demo under ~1:40 without re-rendering WAVs. */
-export const QUICK_VOICE_PLAYBACK_RATE = 1.14;
 const sfxCache = new Map<QuickSfx, HTMLAudioElement>();
 
 export async function playSfx(name: QuickSfx, volume = 0.92): Promise<void> {
@@ -27,9 +25,9 @@ export async function playSfx(name: QuickSfx, volume = 0.92): Promise<void> {
   }
 }
 
-/** Qwen 3 reference-voice WAV playback — same decoder as the live demo. */
+/** Qwen 3 reference-voice WAV playback at natural speed (synced to caption duration). */
 export function playQuickVoice(sceneId: string): Promise<boolean> {
-  return playQwenScene(sceneId, QUICK_VOICE_BASE, QUICK_VOICE_PLAYBACK_RATE);
+  return playQwenScene(sceneId, QUICK_VOICE_BASE);
 }
 
 // --- Intro music bed (HTMLAudio so it layers under the WebAudio voice). ---

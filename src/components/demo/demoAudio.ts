@@ -32,11 +32,7 @@ export async function unlockDemoAudio(): Promise<void> {
   source.start();
 }
 
-export async function playQwenScene(
-  sceneId: string,
-  baseUrl = '/demo/voice',
-  playbackRate = 1,
-): Promise<boolean> {
+export async function playQwenScene(sceneId: string, baseUrl = '/demo/voice'): Promise<boolean> {
   stopQwenScene();
   try {
     const response = await fetch(`${baseUrl}/${sceneId}.wav`, { cache: 'no-store' });
@@ -54,7 +50,6 @@ export async function playQwenScene(
     const buffer = await ctx.decodeAudioData(bytes);
     const source = ctx.createBufferSource();
     source.buffer = buffer;
-    source.playbackRate.value = Math.min(4, Math.max(0.5, playbackRate));
     source.connect(outputNode(ctx));
     currentSource = source;
 
