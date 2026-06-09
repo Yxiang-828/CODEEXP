@@ -54,8 +54,62 @@ async function snapDrawer(page, label) {
   }
 }
 
+async function snapBand(page, label) {
+  // Capture the LiveOpsBand strip — TopChrome + band, no map.
+  await page.waitForTimeout(300);
+  const path = join(OUT_DIR, `${SHOTS.length.toString().padStart(2, '0')}-${label}.png`);
+  try {
+    const vp = page.viewportSize();
+    if (!vp) return;
+    // The band sits just under TopChrome. ~52px top chrome + ~48px band = ~100px.
+    await page.screenshot({
+      path,
+      clip: { x: 0, y: 0, width: vp.width, height: 110 },
+    });
+    SHOTS.push(label);
+    console.log('  ●', label, '(band crop)');
+  } catch (err) {
+    console.warn('    ! band skipped', label, err.message);
+  }
+}
+
 async function waitForKk(page) {
   await page.waitForFunction(() => Boolean(window.__kk));
+}
+
+// Block until AppContext has populated liveSnapshot with actual data.gov.sg
+// readings. Without this we screenshot before the 3 NEA fetches resolve and
+// every "live" panel looks empty.
+async function waitForLiveSnapshot(page, timeoutMs = 8000) {
+  try {
+    await page.waitForFunction(
+      () => {
+        const snap = window.__kk?.liveSnapshot;
+        if (!snap) return false;
+        return (snap.rainfall?.length ?? 0) > 0 || (snap.forecast?.length ?? 0) > 0;
+      },
+      { timeout: timeoutMs },
+    );
+    console.log('  ✓ liveSnapshot populated');
+  } catch {
+    console.warn('  ! liveSnapshot did not arrive within', timeoutMs, 'ms (continuing anyway)');
+  }
+}
+
+// The provider-quota guard persists hit timestamps in localStorage with a
+// 30s min-interval. If we navigate twice (which we do, to seed permissions),
+// the second mount gets rate-limited and liveSnapshot ends up empty. Clear
+// the quota keys before each real load so fresh fetches go through.
+async function clearProviderQuota(page) {
+  await page.evaluate(() => {
+    for (const provider of ['datagov', 'datamall', 'onemap', 'openrouter']) {
+      try {
+        localStorage.removeItem('kk:providerHits:' + provider);
+      } catch {
+        /* noop */
+      }
+    }
+  });
 }
 
 async function login(page, role) {
@@ -95,8 +149,11 @@ async function main() {
       JSON.stringify({ location: false, notifications: false }),
     );
   });
+  // Wipe quota hits from the first mount so the second mount can fetch fresh.
+  await clearProviderQuota(page);
   await page.goto(BASE_URL, { waitUntil: 'networkidle' });
   await waitForKk(page);
+  await waitForLiveSnapshot(page);
   await snap(page, 'login');
 
   // Seed something so the role homes have real data to render against.
@@ -107,6 +164,7 @@ async function main() {
   // ── Citizen ─────────────────────────────────────────────────────────
   await login(page, 'citizen');
   await snap(page, 'citizen-home');
+  await snapBand(page, 'citizen-liveband');
   for (const [id, label] of [
     ['briefing', 'briefing'],
     ['alerts', 'alerts'],
@@ -123,6 +181,7 @@ async function main() {
   // ── Responder ───────────────────────────────────────────────────────
   await login(page, 'responder');
   await snap(page, 'responder-home');
+  await snapBand(page, 'responder-liveband');
   for (const [id, label] of [
     ['mission_board', 'mission-board'],
     ['joinable_missions', 'joinable-missions'],
@@ -152,6 +211,34 @@ async function main() {
     ['source_health', 'source-health'],
     ['activity_log', 'ops-activity-log'],
   ]) {
+    if (id === 'activity_log') {
+      // Populate the log with realistic ops actions so the tile shows what a
+      // working audit feed looks like, not just one God Mode seed entry.
+      await page.evaluate(() => {
+        const kk = window.__kk;
+        if (!kk) return;
+        const repA = kk.fileReport
+          ? kk.fileReport({
+              kind: 'fire',
+              title: 'Smoke spotted near Bedok Mall',
+              body: 'Demo · seeded for the screenshot run.',
+              location: { lng: 103.9298, lat: 1.324 },
+            })
+          : null;
+        const repB = kk.fileReport
+          ? kk.fileReport({
+              kind: 'medical',
+              title: 'Elderly resident collapsed at Tampines',
+              body: 'Demo · seeded for the screenshot run.',
+              location: { lng: 103.9447, lat: 1.3528 },
+            })
+          : null;
+        if (repA && kk.claimReport) kk.claimReport(repA, 'U-OPS-1');
+        if (repA && kk.verifyReport) kk.verifyReport(repA);
+        if (repB && kk.dismissReport) kk.dismissReport(repB);
+      }).catch(() => {});
+      await page.waitForTimeout(500);
+    }
     await openDrawer(page, id);
     await snap(page, `ops-${label}`);
     await snapDrawer(page, `ops-${label}`);
@@ -161,13 +248,16 @@ async function main() {
   // ── God Mode ────────────────────────────────────────────────────────
   // Open via localStorage flag + reload (most robust)
   await page.evaluate(() => localStorage.setItem('kk:godmode:open', '1'));
+  await clearProviderQuota(page);
   await page.reload({ waitUntil: 'networkidle' });
   await waitForKk(page);
   await login(page, 'ops'); // re-auth after reload
   await page.evaluate(() => localStorage.setItem('kk:godmode:open', '1'));
+  await clearProviderQuota(page);
   await page.reload({ waitUntil: 'networkidle' });
   await waitForKk(page);
   await login(page, 'ops');
+  await waitForLiveSnapshot(page);
 
   await page.waitForTimeout(500);
   await snap(page, 'godmode-csot');

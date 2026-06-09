@@ -53,8 +53,8 @@ export const CLUSTERS = [
   {
     id: 'incidents',
     label: 'Incidents',
-    blurb: 'Ops-published canonical events and declared zones.',
-    types: ['CanonicalEvent', 'EmergencyZone'],
+    blurb: 'Ops-published canonical events.',
+    types: ['CanonicalEvent'],
   },
   {
     id: 'operations',
@@ -65,14 +65,14 @@ export const CLUSTERS = [
   {
     id: 'network',
     label: 'Network',
-    blurb: 'Identity, org/capability groups, volunteer events.',
-    types: ['AppUser', 'Group', 'VolunteerEvent'],
+    blurb: 'Identity directory.',
+    types: ['AppUser'],
   },
   {
     id: 'intel',
     label: 'Intel',
-    blurb: 'Source health, NEA snapshot, action logs, notifications.',
-    types: ['SourceHealth', 'LiveSnapshot', 'ActionLog', 'NotificationNotice'],
+    blurb: 'NEA snapshot, action logs, notifications.',
+    types: ['LiveSnapshot', 'ActionLog', 'NotificationNotice'],
   },
   {
     id: 'presentation',

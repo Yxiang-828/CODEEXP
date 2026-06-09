@@ -17,58 +17,23 @@ import {
 } from 'react';
 import { fetchLiveSnapshot, type LiveSnapshot } from './services/live';
 import { askHostAi } from './services/hostAi';
-import { api, connectWs } from './services/backendClient';
+import { csot } from './services/csot';
+import { useCsotVersion } from './hooks/useCsot';
 import { getDistanceKm, etaMinutes } from './utils/geo';
 import { reverseGeocode } from './services/revgeocode';
-import {
-  seedActionLogs,
-  seedCases,
-  seedChat,
-  seedEvents,
-  seedGroups,
-  seedNotifications,
-  seedReports,
-  seedResponders,
-  seedSos,
-  seedSources,
-  seedUsers,
-  seedVolunteerEvents,
-  seedZones,
-  SELF_ID,
-} from './state/seed';
+import { SELF_ID } from './state/seed';
 import { etaFromDistanceKm, selectBriefingCounts } from './state/selectors';
 import type {
   ActionLog,
+  AidCard,
   AppUser,
   CanonicalEvent,
+  CaseMember,
   CaseRoom,
   ChatEntry,
   CitizenReport,
   DistressSession,
-  EmergencyZone,
-  Group,
-  LngLat,
-  NotificationNotice,
-  Responder,
-  Role,
-  SelectedMapItem,
-  SeverityLevel,
-  ShellState,
-  SourceHealth,
-  TrackingState,
-  VolunteerEvent,
-} from './state/types';
-
-export type {
-  ActionLog,
-  AppUser,
-  CanonicalEvent,
-  CaseRoom,
-  ChatEntry,
-  CitizenReport,
-  DistressSession,
-  EmergencyZone,
-  Group,
+  InvestigationTask,
   LngLat,
   NotificationNotice,
   NotificationTier,
@@ -77,17 +42,43 @@ export type {
   SelectedMapItem,
   SeverityLevel,
   ShellState,
-  SourceHealth,
+  SosCaseDetails,
+  SosCategory,
   TrackingState,
-  VolunteerEvent,
+} from './state/types';
+
+export type {
+  ActionLog,
+  AidCard,
+  AppUser,
+  CanonicalEvent,
+  CaseMember,
+  CaseRoom,
+  ChatEntry,
+  CitizenReport,
+  DistressSession,
+  InvestigationTask,
+  LngLat,
+  NotificationNotice,
+  NotificationTier,
+  SosCaseDetails,
+  Responder,
+  Role,
+  SelectedMapItem,
+  SeverityLevel,
+  ShellState,
+  SosCategory,
+  TrackingState,
 } from './state/types';
 
 interface AppState {
   isAuthenticated: boolean;
   role: Role;
   setRole: (r: Role) => void;
-  demoLogin: (r: Role) => void;
-  demoLogout: () => void;
+  selfName: string;
+  setSelfName: (name: string) => void;
+  join: (name: string, role: Role) => void;
+  leave: () => void;
   drawerContent: string | null;
   setDrawerContent: (id: string | null) => void;
   shellState: ShellState;
@@ -95,21 +86,34 @@ interface AppState {
 
   events: CanonicalEvent[];
   reports: CitizenReport[];
+  investigations: InvestigationTask[];
   sosSessions: DistressSession[];
   responders: Responder[];
   users: AppUser[];
-  zones: EmergencyZone[];
-  volunteerEvents: VolunteerEvent[];
+  /** The signed-in user's directory record (name/phone/address), or null. */
+  selfUser: AppUser | null;
+  /** The signed-in user's private first-aid card, or null until filled. */
+  aidCard: AidCard | null;
+  updateAidCard: (patch: Partial<Omit<AidCard, 'userId' | 'updatedAt'>>) => void;
+  /** The signed-in responder's own roster record (responder role only), or null. */
+  selfResponder: Responder | null;
+  /** Responder-only: go on/off shift. Only on-duty responders are paged. */
+  setDuty: (on: boolean) => void;
+  /** Responder-only: declare which SOS categories you can handle. */
+  setProficiencies: (cats: SosCategory[]) => void;
+  /** userIds currently connected to the broker (LWT-backed live presence). */
+  onlineIds: Set<string>;
   cases: CaseRoom[];
   chat: ChatEntry[];
-  sources: SourceHealth[];
-  groups: Group[];
   liveSnapshot: LiveSnapshot | null;
   notifications: NotificationNotice[];
   actionLogs: ActionLog[];
 
   selectedId: string | null;
   setSelectedId: (id: string | null) => void;
+  /** SOS currently opened in a detail sheet (from a map tap or the list), or null. */
+  viewSosId: string | null;
+  setViewSosId: (id: string | null) => void;
   activeCaseId: string | null;
   setActiveCaseId: (id: string | null) => void;
   tracking: TrackingState | null;
@@ -121,61 +125,60 @@ interface AppState {
   selfResponderId: string;
 
   pushNotification: (entry: Omit<NotificationNotice, 'id' | 'createdAt' | 'ackBy'>) => void;
+  sendBroadcast: (b: { audience: Role[]; tier: NotificationTier; area?: string; message: string; details?: string }) => void;
+  // Ops "Declare" — three modes that reuse existing flows:
+  //  notice      → a persistent awareness marker on everyone's map + a bell alert.
+  //  investigate → an InvestigationTask assigned to a responder (report-style).
+  //  case        → an ops-owned SOS case room responders can join/coordinate in.
+  declareNotice: (n: { kind: CanonicalEvent['kind']; title: string; note: string; tier: NotificationTier; area: string; location: LngLat }) => void;
+  declareInvestigate: (i: { responderId: string; responderName?: string; kind: CanonicalEvent['kind']; title: string; body: string; location: LngLat }) => void;
+  declareCase: (c: { category: SosCategory; title: string; details: string; area: string; location: LngLat }) => string;
   fileReport: (r: Omit<CitizenReport, 'id' | 'status' | 'createdAt' | 'reporterTrust'>) => string;
-  claimReport: (id: string, by: string) => void;
   verifyReport: (id: string) => void;
   dismissReport: (id: string) => void;
+  /** Ops dispatches a report to a responder to investigate (creates a task). */
+  dispatchReport: (reportId: string, responderId: string) => void;
+  /** The assigned responder closes the investigation with an outcome. */
+  resolveInvestigation: (reportId: string, outcome: string) => void;
+  /** Ops blocks/terminates an SOS case it deems fake or unneeded. */
+  terminateSos: (sosId: string, reason: string) => void;
+  /** Ops stands a case down as HANDLED (resolved) — the clean close, distinct
+   *  from terminate (fake/unneeded). Used to close ops-declared cases and to
+   *  force-resolve a citizen SOS ops has confirmed handled. */
+  standDownSos: (sosId: string) => void;
 
-  startSos: (s: Omit<DistressSession, 'id' | 'status' | 'startedAt'>) => string;
-  assignSos: (sosId: string, responderId: string) => void;
-  advanceSos: (sosId: string, to: DistressSession['status']) => void;
+  startSos: (s: { citizenName: string; category: SosCategory; details?: string; location: LngLat; phone?: string }) => string;
+  /** Responder joins an SOS case (subscribes to the private room, becomes a live
+   *  member). Joining is what reveals the aid card — no accept/dispatch step. */
+  joinSosCase: (sosId: string) => void;
+  leaveSosCase: (sosId: string) => void;
+  /** Joined responder marks themselves on scene. */
+  markArrived: (sosId: string) => void;
+  /** Group chat for a case — owner + joined responders only. */
+  sendCaseChat: (sosId: string, text: string) => void;
+  /** Private case-room selectors (only populated for the owner + joined). */
+  caseMembers: (sosId: string) => CaseMember[];
+  caseChat: (sosId: string) => ChatEntry[];
+  caseDetails: (sosId: string) => SosCaseDetails | undefined;
+  /** SOS case ids this responder has joined (drives live location publishing). */
+  joinedCaseIds: Set<string>;
   confirmSosSafe: (sosId: string, by: 'citizen' | 'responder') => void;
   cancelSos: (sosId: string) => void;
-  messageCitizen: (targetId: string, responderId: string, text: string) => void;
 
-  declareIncident: (e: Omit<CanonicalEvent, 'id' | 'createdAt' | 'status'>) => string;
+  /** Tombstone a declared incident/notice (removes its map marker). */
   resolveEvent: (eventId: string) => void;
-  declareZone: (z: Omit<EmergencyZone, 'id' | 'createdAt' | 'status'>) => string;
-  updateZoneStatus: (zoneId: string, status: EmergencyZone['status']) => void;
-  assignIncident: (eventId: string, responderId: string) => void;
-  toggleDuty: (responderId: string, on: boolean) => void;
-  updateResponderStatus: (responderId: string, status: Responder['status']) => void;
   updateSelfProfile: (patch: Partial<AppUser>) => void;
-  updateUserProfile: (userId: string, patch: Partial<AppUser>) => void;
-  createVolunteerEvent: (e: Omit<VolunteerEvent, 'id' | 'createdAt' | 'registeredResponderIds' | 'status'>) => string;
-  joinVolunteerEvent: (eventId: string, responderId: string) => void;
-  unregisterVolunteerEvent: (eventId: string, responderId: string) => void;
 
+  // Case-room AI scaffold (dormant — reserved for the named-agent phase).
   sendChat: (caseId: string, authorId: string, text: string) => void;
   askHost: (caseId: string, query: string) => void;
 
-  joinGroup: (groupId: string, responderId: string) => void;
-  leaveGroup: (groupId: string, responderId: string) => void;
-  joinCase: (caseId: string, responderId: string) => void;
-  leaveCase: (caseId: string, responderId: string) => void;
-  requestCaseFormation: (eventId: string, responderId: string) => void;
-  acceptCaseFormation: (eventId: string) => void;
-  declineCaseFormation: (eventId: string, reason?: string) => void;
-  closeCase: (caseId: string, finalReport: string) => void;
   ackNotification: (notificationId: string, actorId: string) => void;
 
   selfLocation: LngLat | null;
   setSelfLocation: (loc: LngLat | null) => void;
   selfPlaceName: string | null;
-  liveTracking: boolean;
-  setLiveTracking: (on: boolean) => void;
   updateResponderLocation: (responderId: string, loc: LngLat) => void;
-  draftPolygon: LngLat[];
-  setDraftPolygon: (pts: LngLat[]) => void;
-
-  // God Mode hooks — demo-only mutators. Real flows must go through the
-  // role-appropriate actions above; these exist to drive demos without
-  // re-creating the full user journey each time.
-  godSetSourceState: (sourceId: string, state: SourceHealth['state']) => void;
-  godSeedScenario: (kind: 'minor' | 'major') => void;
-  godSeedRoster: () => void;
-  godClearRoster: () => void;
-  godResetCsot: () => void;
 }
 
 const AppContext = createContext<AppState | undefined>(undefined);
@@ -183,28 +186,170 @@ const AppContext = createContext<AppState | undefined>(undefined);
 export const AppProvider = ({ children }: { children: ReactNode }) => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [role, setRole] = useState<Role>('citizen');
+  const [selfName, setSelfName] = useState('');
   const [drawerContent, setDrawerContentRaw] = useState<string | null>(null);
   const [shellState, setShellState] = useState<ShellState>('S0');
 
-  const [backendOnline, setBackendOnline] = useState(false);
-  const [events, setEvents] = useState<CanonicalEvent[]>(seedEvents);
-  const [reports, setReports] = useState<CitizenReport[]>(seedReports);
-  const [sosSessions, setSosSessions] = useState<DistressSession[]>(seedSos);
-  const [responders, setResponders] = useState<Responder[]>(seedResponders);
-  const [users, setUsers] = useState<AppUser[]>(seedUsers);
-  const [zones, setZones] = useState<EmergencyZone[]>(seedZones);
-  const [volunteerEvents, setVolunteerEvents] = useState<VolunteerEvent[]>(seedVolunteerEvents);
-  const [cases, setCases] = useState<CaseRoom[]>(seedCases);
-  const [chat, setChat] = useState<ChatEntry[]>(seedChat);
-  const [sources, setSources] = useState<SourceHealth[]>(seedSources);
-  const [groups, setGroups] = useState<Group[]>(seedGroups);
+  // NEA-derived weather incidents (PSI/rainfall). Every client derives these
+  // from the same live snapshot, so they stay a LOCAL overlay rather than being
+  // republished to CSOT (which would be a needless publish storm).
+  const [liveEvents, setLiveEvents] = useState<CanonicalEvent[]>([]);
   const [liveSnapshot, setLiveSnapshot] = useState<LiveSnapshot | null>(null);
-  const [notifications, setNotifications] = useState<NotificationNotice[]>(seedNotifications);
-  const [actionLogs, setActionLogs] = useState<ActionLog[]>(seedActionLogs);
+
+  // ── CSOT-derived state ─────────────────────────────────────────────
+  // The roster and user directory are NOT local seed: they are real people who
+  // joined, mirrored live from the broker. Re-snapshot whenever any topic moves.
+  const csotVersion = useCsotVersion();
+  const responders = useMemo<Responder[]>(
+    () => csot.collection<Responder>('operations', 'responder'),
+    [csotVersion],
+  );
+  const users = useMemo<AppUser[]>(
+    () => csot.collection<AppUser>('network', 'user'),
+    [csotVersion],
+  );
+  // Case rooms are shared channels; chat is the message stream inside them.
+  // Both live in the operations cluster so every member converges on the same
+  // room state and roster — this is what makes a case room genuinely multi-user.
+  const cases = useMemo<CaseRoom[]>(
+    () => csot.collection<CaseRoom>('operations', 'case').sort((a, b) => b.startedAt - a.startedAt),
+    [csotVersion],
+  );
+  const chat = useMemo<ChatEntry[]>(
+    () => csot.collection<ChatEntry>('operations', 'chat').sort((a, b) => a.ts - b.ts),
+    [csotVersion],
+  );
+  // Intake (citizen-originated) + incidents, all from CSOT. SOS and reports are
+  // owner-scoped at the transport, so a citizen's collection holds only theirs.
+  const sosSessions = useMemo<DistressSession[]>(
+    () => csot.collection<DistressSession>('intake', 'sos').sort((a, b) => b.startedAt - a.startedAt),
+    [csotVersion],
+  );
+  const reports = useMemo<CitizenReport[]>(
+    () => csot.collection<CitizenReport>('intake', 'report').sort((a, b) => b.createdAt - a.createdAt),
+    [csotVersion],
+  );
+  const investigations = useMemo<InvestigationTask[]>(
+    () => csot.collection<InvestigationTask>('operations', 'investigation').sort((a, b) => b.createdAt - a.createdAt),
+    [csotVersion],
+  );
+  const csotEvents = useMemo<CanonicalEvent[]>(
+    () => csot.collection<CanonicalEvent>('incidents', 'event'),
+    [csotVersion],
+  );
+  // The map/feeds see one merged stream: shared declared/verified incidents from
+  // CSOT plus this client's live weather overlay.
+  const events = useMemo<CanonicalEvent[]>(
+    () => [...csotEvents, ...liveEvents],
+    [csotEvents, liveEvents],
+  );
+
+  // SOS topic carries the owner id (csot/intake/sos/<owner>/<id>) so the broker
+  // only delivers it to that citizen + responders/ops. patchSos preserves it.
+  const putSos = useCallback((s: DistressSession) => {
+    const owner = s.ownerId ?? csot.identity?.userId ?? 'anon';
+    csot.put('intake', 'sos', `${owner}/${s.id}`, { ...s, ownerId: owner });
+  }, []);
+  const patchSos = useCallback((sosId: string, fn: (s: DistressSession) => DistressSession) => {
+    const cur = csot.collection<DistressSession>('intake', 'sos').find((s) => s.id === sosId);
+    if (cur) putSos(fn(cur));
+  }, []);
+  // Reports are owner-scoped the same way (ops-only + reporter until verified).
+  const putReport = useCallback((r: CitizenReport) => {
+    const owner = r.ownerId ?? csot.identity?.userId ?? 'anon';
+    csot.put('intake', 'report', `${owner}/${r.id}`, { ...r, ownerId: owner });
+  }, []);
+  const patchReport = useCallback((reportId: string, fn: (r: CitizenReport) => CitizenReport) => {
+    const cur = csot.collection<CitizenReport>('intake', 'report').find((r) => r.id === reportId);
+    if (cur) putReport(fn(cur));
+  }, []);
+  // Canonical incidents are shared (no owner scoping).
+  const putEvent = useCallback((e: CanonicalEvent) => {
+    csot.put('incidents', 'event', e.id, e);
+  }, []);
+
+  // Notifications + audit logs, role-scoped at the transport (one copy per
+  // targeted role under csot/presentation/<type>/<role>/<id>). ops sees every
+  // role's copy, so dedup by id; for notifications, union ackBy across copies.
+  const notifications = useMemo<NotificationNotice[]>(() => {
+    const byId = new Map<string, NotificationNotice>();
+    for (const n of csot.collection<NotificationNotice>('presentation', 'notification')) {
+      const prev = byId.get(n.id);
+      byId.set(n.id, prev
+        ? { ...prev, ackBy: Array.from(new Set([...prev.ackBy, ...n.ackBy])) }
+        : n);
+    }
+    return Array.from(byId.values()).sort((a, b) => b.createdAt - a.createdAt);
+  }, [csotVersion]);
+  const actionLogs = useMemo<ActionLog[]>(() => {
+    const byId = new Map<string, ActionLog>();
+    for (const l of csot.collection<ActionLog>('presentation', 'log')) byId.set(l.id, l);
+    return Array.from(byId.values()).sort((a, b) => b.createdAt - a.createdAt);
+  }, [csotVersion]);
+
+  // Live presence: the broker publishes each member's online flag and, via the
+  // Last-Will, an offline marker the instant they drop. This is the "who's in
+  // the channel right now" signal, distinct from on/off-duty status.
+  const onlineIds = useMemo<Set<string>>(
+    () => new Set(
+      csot.presence<{ userId: string; online: boolean }>()
+        .filter((p) => p?.online)
+        .map((p) => p.userId),
+    ),
+    [csotVersion],
+  );
+  // Self identity comes from the bridge-minted userId; falls back to the static
+  // SELF_ID only before a successful join (so the responder workspace renders).
+  const selfResponderId = csot.identity?.userId ?? SELF_ID;
+
+  // The signed-in user's own directory record + private aid card.
+  const selfUser = useMemo<AppUser | null>(
+    () => users.find((u) => u.id === selfResponderId) ?? null,
+    [users, selfResponderId],
+  );
+  const aidCard = useMemo<AidCard | null>(
+    () => csot.get<AidCard>('network', 'aidcard', selfResponderId) ?? null,
+    [csotVersion, selfResponderId],
+  );
+  const updateAidCard: AppState['updateAidCard'] = (patch) => {
+    const id = csot.identity?.userId;
+    if (!id) return;
+    const cur = csot.get<AidCard>('network', 'aidcard', id);
+    const next: AidCard = {
+      allergies: '', conditions: [], carries: [], access: [], language: '',
+      nokName: '', nokPhone: '', nokRelation: '',
+      ...cur, ...patch, userId: id, updatedAt: Date.now(),
+    };
+    csot.put('network', 'aidcard', id, next);
+  };
+
+  // All roster writes flow through here so CSOT stays the single source of truth.
+  const patchResponder = useCallback((id: string, fn: (r: Responder) => Responder) => {
+    const cur = csot.collection<Responder>('operations', 'responder').find((r) => r.id === id);
+    if (cur) csot.put('operations', 'responder', id, fn(cur));
+  }, []);
+
+  // Responder-only: the signed-in responder's own roster record + shift/skills.
+  const selfResponder = useMemo<Responder | null>(
+    () => responders.find((r) => r.id === selfResponderId) ?? null,
+    [responders, selfResponderId],
+  );
+  const setDuty: AppState['setDuty'] = (on) =>
+    patchResponder(selfResponderId, (r) => ({ ...r, onDuty: on, status: on ? 'ready' : 'out' }));
+  const setProficiencies: AppState['setProficiencies'] = (proficiencies) =>
+    patchResponder(selfResponderId, (r) => ({ ...r, proficiencies }));
+  // Chat id carries the caseId in the topic path (csot/operations/chat/<case>/<msg>)
+  // so the broker scopes a room's history and citizens can be granted just chat.
+  const putChat = useCallback((entry: ChatEntry) => {
+    csot.put('operations', 'chat', `${entry.caseId}/${entry.id}`, entry);
+  }, []);
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [viewSosId, setViewSosId] = useState<string | null>(null);
   const [activeCaseId, setActiveCaseId] = useState<string | null>(null);
   const [tracking, setTracking] = useState<TrackingState | null>(null);
+  // SOS cases this responder has joined — drives live member-location publishing.
+  const [joinedCaseIds, setJoinedCaseIds] = useState<Set<string>>(() => new Set());
   const [selfLocation, setSelfLocation] = useState<LngLat | null>(null);
   const [selfPlaceName, setSelfPlaceName] = useState<string | null>(null);
   const lastGeocodeKeyRef = useRef<string | null>(null);
@@ -228,90 +373,129 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     }, 600);
     return () => { cancelled = true; clearTimeout(handle); };
   }, [selfLocation]);
-  const [liveTracking, setLiveTracking] = useState(false);
-  const [draftPolygon, setDraftPolygon] = useState<LngLat[]>([]);
   const [selectedMapItem, setSelectedMapItem] = useState<SelectedMapItem | null>(null);
-  const autoTrackingKey = useRef<string | null>(null);
-
-  useEffect(() => {
-    const disconnect = connectWs((type, payload) => {
-      if (type === 'state:full') {
-        const s = payload as { responders: Responder[]; events: CanonicalEvent[]; sosSessions: DistressSession[]; reports: CitizenReport[]; cases: CaseRoom[]; chat: ChatEntry[] };
-        if (s.responders?.length) setResponders(s.responders as Responder[]);
-        if (s.events?.length) setEvents(s.events as CanonicalEvent[]);
-        if (s.sosSessions?.length) setSosSessions(s.sosSessions as DistressSession[]);
-        if (s.reports?.length) setReports(s.reports as CitizenReport[]);
-        if (s.cases?.length) setCases(s.cases as CaseRoom[]);
-        if (s.chat?.length) setChat(s.chat as ChatEntry[]);
-        setBackendOnline(true);
-      } else if (type === 'responder:updated') {
-        setResponders((prev) => prev.map((r) => (r.id === (payload as Responder).id ? (payload as Responder) : r)));
-      } else if (type === 'event:created') {
-        setEvents((prev) => [payload as CanonicalEvent, ...prev.filter((e) => e.id !== (payload as CanonicalEvent).id)]);
-      } else if (type === 'event:updated') {
-        setEvents((prev) => prev.map((e) => (e.id === (payload as CanonicalEvent).id ? (payload as CanonicalEvent) : e)));
-      } else if (type === 'sos:created') {
-        setSosSessions((prev) => [payload as DistressSession, ...prev.filter((s) => s.id !== (payload as DistressSession).id)]);
-      } else if (type === 'sos:updated') {
-        setSosSessions((prev) => prev.map((s) => (s.id === (payload as DistressSession).id ? (payload as DistressSession) : s)));
-      } else if (type === 'report:created') {
-        setReports((prev) => [payload as CitizenReport, ...prev.filter((r) => r.id !== (payload as CitizenReport).id)]);
-      } else if (type === 'report:updated') {
-        setReports((prev) => prev.map((r) => (r.id === (payload as CitizenReport).id ? (payload as CitizenReport) : r)));
-      } else if (type === 'case:created') {
-        setCases((prev) => [payload as CaseRoom, ...prev.filter((c) => c.id !== (payload as CaseRoom).id)]);
-      } else if (type === 'case:updated') {
-        setCases((prev) => prev.map((c) => (c.id === (payload as CaseRoom).id ? (payload as CaseRoom) : c)));
-      } else if (type === 'chat:message') {
-        setChat((prev) => [...prev, payload as ChatEntry]);
-      }
-    });
-    return disconnect;
-  }, []);
 
   const setDrawerContent = useCallback((id: string | null) => {
     setDrawerContentRaw(id);
     setShellState(id ? 'S2' : 'S0');
   }, []);
 
-  const demoLogin: AppState['demoLogin'] = (nextRole) => {
+  const join: AppState['join'] = (name, nextRole) => {
+    setSelfName(name.trim());
     setRole(nextRole);
     setIsAuthenticated(true);
     setDrawerContentRaw(null);
     setShellState('S0');
+    // Mint a real identity on the bridge and connect the core MQTT transport.
+    // Failure (broker not reachable) degrades gracefully — the app still runs.
+    csot.join(name.trim(), nextRole)
+      .then((id) => {
+        // A RETURNING demo account already has its profile, aid card, skills and
+        // duty state retained in the broker — they replay on reconnect. Writing
+        // the defaults below would clobber them, so only seed for a NEW account.
+        if (csot.restored) return;
+        // Publish self into the CSOT so others see a real person, not seed.
+        csot.put('network', 'user', id.userId, {
+          id: id.userId,
+          username: id.name,
+          displayName: id.name,
+          phone: '',
+          primaryRole: nextRole,
+          address: '',
+          skills: [],
+          available: true,
+        });
+        // A responder joins the dispatchable roster. Org/skill are unknown until
+        // self-declared — we don't fabricate them. Location starts at last known
+        // GPS (or SG centre) and is refined by the live-tracking effect.
+        if (nextRole === 'responder') {
+          csot.put('operations', 'responder', id.userId, {
+            id: id.userId,
+            name: id.name,
+            org: 'Volunteer',
+            role: 'aux',
+            status: 'ready',
+            location: selfLocation ?? { lng: 103.8198, lat: 1.3521 },
+            groups: [],
+            unitType: 'volunteer',
+            onDuty: true,
+            proficiencies: [],
+          });
+        }
+      })
+      .catch(() => {});
   };
 
-  const demoLogout: AppState['demoLogout'] = () => {
+  const leave: AppState['leave'] = () => {
+    csot.leave();
     setIsAuthenticated(false);
+    setSelfName('');
     setDrawerContentRaw(null);
     setShellState('S0');
     setTracking(null);
   };
 
+  // Push real GPS into the self responder's CSOT record so ops sees the true
+  // position (and distance/ETA fit scores) of the person on the ground.
   useEffect(() => {
-    const activeCitizenSos = role === 'citizen'
-      ? sosSessions.find((s) => !['resolved', 'cancelled'].includes(s.status))
-      : null;
-    const activeResponderSos = role === 'responder'
-      ? sosSessions.find((s) => s.assignedResponderId === SELF_ID && !['resolved', 'cancelled'].includes(s.status))
-      : null;
-    const activeResponderCase = role === 'responder'
-      ? cases.find((c) => c.members.includes(SELF_ID) && c.state !== 'resolved')
-      : null;
-    const nextKey =
-      activeCitizenSos ? `citizen:${activeCitizenSos.id}` :
-      activeResponderSos ? `responder:sos:${activeResponderSos.id}` :
-      activeResponderCase ? `responder:case:${activeResponderCase.id}` :
-      null;
+    if (role !== 'responder' || !selfLocation || !csot.identity) return;
+    patchResponder(selfResponderId, (r) => ({ ...r, location: selfLocation }));
+    // Live-track inside every joined SOS case: republish my member entry with the
+    // fresh location + ETA. The owner (subscribed to the private room) sees me
+    // approaching, GrabFood-style. Only the room's participants receive this.
+    // NB: read the SOS location DIRECTLY from the store, not the memoized
+    // sosSessions — depending on it here would loop (patchResponder bumps the
+    // version → new sosSessions → effect re-runs → patchResponder → …).
+    for (const sosId of joinedCaseIds) {
+      const me = csot.collectionByPrefix<CaseMember>(`csot/case/${sosId}/member/`).find((m) => m.id === selfResponderId);
+      const sos = csot.collection<DistressSession>('intake', 'sos').find((s) => s.id === sosId);
+      const eta = sos && me?.status !== 'arrived' ? etaFromDistanceKm(getDistanceKm(selfLocation, sos.location)) : me?.eta;
+      csot.publishTopic(`csot/case/${sosId}/member/${selfResponderId}`, {
+        id: selfResponderId,
+        name: me?.name ?? selfName ?? 'Responder',
+        role: me?.role ?? 'responder',
+        proficiencies: me?.proficiencies ?? [],
+        status: me?.status ?? 'en_route',
+        joinedAt: me?.joinedAt ?? Date.now(),
+        location: selfLocation,
+        eta,
+      } satisfies CaseMember);
+    }
+  }, [role, selfLocation, selfResponderId, patchResponder, joinedCaseIds, selfName]);
 
-    if (nextKey && autoTrackingKey.current !== nextKey) {
-      autoTrackingKey.current = nextKey;
-      setLiveTracking(true);
+  // When a joined case ends (owner resolved or cancelled it), clean up our
+  // membership locally: drop the subscription and free the responder.
+  useEffect(() => {
+    if (role !== 'responder') return;
+    for (const sosId of joinedCaseIds) {
+      const sos = sosSessions.find((s) => s.id === sosId);
+      if (sos && !['resolved', 'cancelled'].includes(sos.status)) continue;
+      csot.unsubscribeTopic(`csot/case/${sosId}/#`);
+      setJoinedCaseIds((prev) => { const n = new Set(prev); n.delete(sosId); return n; });
+      patchResponder(selfResponderId, (r) => (r.assignedSosId === sosId ? { ...r, status: 'ready', assignedSosId: undefined } : r));
     }
-    if (!nextKey) {
-      autoTrackingKey.current = null;
+  }, [role, joinedCaseIds, sosSessions, selfResponderId, patchResponder]);
+
+  // Ops reflects a closed investigation back onto the citizen's report — ops is
+  // the only party that sees BOTH the operations investigation and the intake
+  // report, so it bridges them. The ref makes it strictly once-per-investigation
+  // so a write can never re-trigger this effect into a loop.
+  const reflectedReports = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (role !== 'ops') return;
+    for (const t of investigations) {
+      if (t.status !== 'resolved' || reflectedReports.current.has(t.id)) continue;
+      const rep = csot.collection<CitizenReport>('intake', 'report').find((r) => r.id === t.reportId);
+      if (rep && rep.status !== 'resolved' && rep.status !== 'dismissed') {
+        reflectedReports.current.add(t.id);
+        patchReport(rep.id, (r) => ({
+          ...r,
+          status: 'resolved',
+          auditTrail: [...(r.auditTrail ?? []), `Investigator closed: ${t.outcome || 'resolved'}.`],
+        }));
+      }
     }
-  }, [role, sosSessions, cases]);
+  }, [role, investigations, patchReport]);
 
   useEffect(() => {
     let alive = true;
@@ -319,9 +503,9 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       const snap = await fetchLiveSnapshot();
       if (!alive) return;
       setLiveSnapshot(snap);
-      // Promote dangerous PSI readings into the event stream
-      setEvents((prev) => {
-        const next = prev.filter((e) => !e.id.startsWith('LIVE-'));
+      // Promote dangerous PSI/rainfall readings into the local live-event overlay.
+      setLiveEvents(() => {
+        const next: CanonicalEvent[] = [];
         for (const p of snap.psi) {
           if (p.psi24h !== null && p.psi24h >= 100) {
             next.push({
@@ -361,61 +545,129 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     };
   }, []);
 
+  // IDs must be globally unique across clients: a per-counter alone collides
+  // (every client started at 5000, so two browsers both minted REP-5005 → the
+  // same retained report under two owners, React key clashes, and ops verifying
+  // "REP-5005" could hit the wrong owner's copy). Suffix a per-session token.
   const counter = useRef(5000);
-  const newId = (p: string) => `${p}-${++counter.current}`;
+  const idToken = useRef(Math.random().toString(36).slice(2, 7));
+  const newId = (p: string) => `${p}-${++counter.current}-${idToken.current}`;
 
+  // Fan out one retained copy per audience role, so each role's subscription
+  // (and only that role) receives it. visibleTo drives who can see a log.
   const pushLog = useCallback(
     (entry: Omit<ActionLog, 'id' | 'createdAt'>) => {
-      setActionLogs((prev) => [
-        {
-          ...entry,
-          id: newId('LOG'),
-          createdAt: Date.now(),
-        },
-        ...prev,
-      ]);
+      const log: ActionLog = { ...entry, id: newId('LOG'), createdAt: Date.now() };
+      for (const r of entry.visibleTo) csot.put('presentation', 'log', `${r}/${log.id}`, log);
     },
     []
   );
 
   const pushNotification = useCallback(
     (entry: Omit<NotificationNotice, 'id' | 'createdAt' | 'ackBy'>) => {
-      setNotifications((prev) => [
-        {
-          ...entry,
-          id: newId('NT'),
-          createdAt: Date.now(),
-          ackBy: [],
-        },
-        ...prev,
-      ]);
+      const notif: NotificationNotice = { ...entry, id: newId('NT'), createdAt: Date.now(), ackBy: [] };
+      for (const r of entry.roles) csot.put('presentation', 'notification', `${r}/${notif.id}`, notif);
     },
     []
   );
 
-  const ackNotification: AppState['ackNotification'] = (notificationId, actorId) =>
-    setNotifications((prev) =>
-      prev.map((n) =>
-        n.id === notificationId && !n.ackBy.includes(actorId)
-          ? { ...n, ackBy: [...n.ackBy, actorId] }
-          : n
-      )
-    );
+  // Ops-authored area broadcast — fans out as a role-scoped alert to the chosen
+  // audience (residents / responders / both). Reuses the notification transport;
+  // ops sees every copy (subscribes csot/#) as its sent-log. Fire-and-forget.
+  const sendBroadcast: AppState['sendBroadcast'] = ({ audience, tier, area, message, details }) => {
+    pushNotification({ kind: 'broadcast', tier, roles: audience, title: message, body: details ?? '', area });
+    pushLog({
+      actorId: selfResponderId,
+      actorRole: 'ops',
+      action: 'broadcast.sent',
+      targetId: selfResponderId,
+      message: `Broadcast (${tier}) → ${audience.join(' + ')}${area ? ` · ${area}` : ''}: ${message}`,
+      severity: tier === 'critical' ? 5 : tier === 'urgent' ? 4 : 2,
+      visibleTo: ['ops'],
+    });
+  };
+
+  // ── Ops "Declare" ────────────────────────────────────────────────────────
+  // A Notice is awareness-only: a canonical event (so it pins on every role's
+  // map, beyond the API indicators) plus a broadcast-tier bell alert. No response
+  // workflow — fire-and-forget.
+  const declareNotice: AppState['declareNotice'] = ({ kind, title, note, tier, area, location }) => {
+    const id = newId('EV');
+    const severity = (tier === 'critical' ? 5 : tier === 'urgent' ? 4 : tier === 'watch' ? 3 : 2) as SeverityLevel;
+    putEvent({ id, kind, title, severity, status: 'verified', location, source: `Ops notice · ${area || 'Islandwide'}`, createdAt: Date.now() });
+    pushNotification({ kind: 'broadcast', tier, roles: ['citizen', 'responder', 'ops'], title, body: note, area: area || 'Islandwide', targetId: id });
+    pushLog({
+      actorId: selfResponderId, actorRole: 'ops', action: 'notice.declared', targetId: id,
+      message: `Notice "${title}" posted${area ? ` · ${area}` : ''}.`, severity, visibleTo: ['ops', 'responder'],
+    });
+  };
+
+  // An ops-originated investigation, dispatched to a chosen responder — identical
+  // to report dispatch but with no backing citizen report (reportId left blank).
+  const declareInvestigate: AppState['declareInvestigate'] = ({ responderId, responderName, kind, title, body, location }) => {
+    const id = newId('INV');
+    csot.put('operations', 'investigation', id, {
+      id, reportId: '', assignedTo: responderId, assignedName: responderName,
+      kind, title, body, location, status: 'open', createdAt: Date.now(),
+    } satisfies InvestigationTask);
+    patchResponder(responderId, (r) => ({ ...r, status: 'en_route' }));
+    pushLog({
+      actorId: selfResponderId, actorRole: 'ops', action: 'investigation.declared', targetId: id,
+      message: `Ops asked ${responderName ?? responderId} to investigate "${title}".`, severity: 2, visibleTo: ['ops', 'responder'],
+    });
+    pushNotification({
+      tier: 'watch', roles: ['responder'], title: 'Investigation assigned',
+      body: `Ops asked you to check: ${title}.`, targetId: id,
+    });
+  };
+
+  // An ops-originated case: same two-tier SOS machinery (public signal + private
+  // room) but ops is the owner. Responders discover it, join, and coordinate in
+  // the room exactly as for a citizen SOS. Ops closes it via Terminate.
+  const declareCase: AppState['declareCase'] = ({ category, title, details, area, location }) => {
+    const id = newId('SOS');
+    const who = title || `Ops case · ${area || 'area'}`;
+    putSos({
+      id, ownerId: selfResponderId, citizenName: who, category, details,
+      location, status: 'requesting', memberCount: 0, startedAt: Date.now(),
+    });
+    csot.subscribeTopic(`csot/case/${id}/#`);
+    csot.publishTopic(`csot/case/${id}/info`, { ownerName: who, category } satisfies SosCaseDetails);
+    pushLog({
+      actorId: selfResponderId, actorRole: 'ops', action: 'case.declared', targetId: id,
+      message: `Ops opened a ${category} case "${who}"${area ? ` · ${area}` : ''}. On-duty responders nearby recommended.`,
+      severity: 4, visibleTo: ['ops', 'responder'],
+    });
+    pushNotification({
+      tier: 'urgent', roles: ['responder'], title: `Ops case · ${category}`,
+      body: `${who}${area ? ` · ${area}` : ''}. Join to respond.`, targetId: id,
+    });
+    return id;
+  };
+
+  // Ack updates only the actor's own role-copy (the one they actually hold);
+  // ops merges ackBy across copies when reading, so the picture stays whole.
+  const ackNotification: AppState['ackNotification'] = (notificationId, actorId) => {
+    const key = `${role}/${notificationId}`;
+    const cur = csot.get<NotificationNotice>('presentation', 'notification', key);
+    if (!cur || cur.ackBy.includes(actorId)) return;
+    csot.put('presentation', 'notification', key, { ...cur, ackBy: [...cur.ackBy, actorId] });
+  };
 
   const fileReport: AppState['fileReport'] = (r) => {
     const id = newId('REP');
-    api.createReport({ kind: r.kind, title: r.title, body: r.body, location: r.location }).catch(() => {});
     const rec: CitizenReport = {
       ...r,
       id,
+      ownerId: selfResponderId,
       status: 'pending',
       reporterTrust: 0.6,
       createdAt: Date.now(),
       auditTrail: ['Citizen filed report. Routed to ops queue only.'],
     };
-    setReports((prev) => [rec, ...prev]);
+    putReport(rec);
     pushLog({
-      actorId: 'U-CIV-1',
+      actorId: selfResponderId,
       actorRole: 'citizen',
       action: 'report.filed',
       targetId: id,
@@ -432,63 +684,32 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     });
     return id;
   };
-  const claimReport: AppState['claimReport'] = (id, by) => {
-    setReports((prev) =>
-      prev.map((r) =>
-        r.id === id
-          ? {
-              ...r,
-              status: 'claimed',
-              claimedBy: by,
-              auditTrail: [...(r.auditTrail ?? []), `Claimed by ${by}.`],
-            }
-          : r
-      )
-    );
-    pushLog({
-      actorId: by,
-      actorRole: 'ops',
-      action: 'report.claimed',
-      targetId: id,
-      message: `${id} claimed for ops review.`,
-      visibleTo: ['ops'],
-    });
-  };
   const verifyReport: AppState['verifyReport'] = (id) => {
     const report = reports.find((r) => r.id === id);
     if (!report) return;
     const eventId = newId('EV');
-    setEvents((prev) => [
-      {
-        id: eventId,
-        kind: report.kind,
-        title: report.title,
-        severity: 3 as SeverityLevel,
-        status: 'verified',
-        location: report.location,
-        source: 'ops verification',
-        createdAt: Date.now(),
-      },
-      ...prev,
-    ]);
-    setReports((prev) =>
-      prev.map((r) =>
-        r.id === id
-          ? {
-              ...r,
-              status: 'verified',
-              promotedToEventId: eventId,
-              notifiedReporter: true,
-              auditTrail: [
-                ...(r.auditTrail ?? []),
-                'Ops verified report.',
-                `Canonical event ${eventId} published to responders and citizens.`,
-                'Reporter acknowledgement notification queued.',
-              ],
-            }
-          : r
-      )
-    );
+    putEvent({
+      id: eventId,
+      kind: report.kind,
+      title: report.title,
+      severity: 3 as SeverityLevel,
+      status: 'verified',
+      location: report.location,
+      source: 'ops verification',
+      createdAt: Date.now(),
+    });
+    patchReport(id, (r) => ({
+      ...r,
+      status: 'verified',
+      promotedToEventId: eventId,
+      notifiedReporter: true,
+      auditTrail: [
+        ...(r.auditTrail ?? []),
+        'Ops verified report.',
+        `Canonical event ${eventId} published to responders and citizens.`,
+        'Reporter acknowledgement notification queued.',
+      ],
+    }));
     pushLog({
       actorId: 'ops',
       actorRole: 'ops',
@@ -515,18 +736,12 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   };
   const dismissReport: AppState['dismissReport'] = (id) => {
     const report = reports.find((r) => r.id === id);
-    setReports((prev) =>
-      prev.map((r) =>
-        r.id === id
-          ? {
-              ...r,
-              status: 'dismissed',
-              notifiedReporter: true,
-              auditTrail: [...(r.auditTrail ?? []), 'Ops dismissed report and notified reporter.'],
-            }
-          : r
-      )
-    );
+    patchReport(id, (r) => ({
+      ...r,
+      status: 'dismissed',
+      notifiedReporter: true,
+      auditTrail: [...(r.auditTrail ?? []), 'Ops dismissed report and notified reporter.'],
+    }));
     pushLog({
       actorId: 'ops',
       actorRole: 'ops',
@@ -544,452 +759,319 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     });
   };
 
+  // Ops dispatches a non-emergency report to a responder to investigate. Creates
+  // an InvestigationTask in the operations cluster (which responders see) so the
+  // assigned responder gets the task without access to the raw report queue.
+  const dispatchReport: AppState['dispatchReport'] = (reportId, responderId) => {
+    const report = reports.find((r) => r.id === reportId);
+    const responder = responders.find((r) => r.id === responderId);
+    if (!report) return;
+    csot.put('operations', 'investigation', reportId, {
+      id: reportId,
+      reportId,
+      assignedTo: responderId,
+      assignedName: responder?.name,
+      kind: report.kind,
+      title: report.title,
+      body: report.body,
+      location: report.location,
+      status: 'open',
+      createdAt: Date.now(),
+    });
+    patchReport(reportId, (r) => ({
+      ...r,
+      status: 'investigating',
+      assignedInvestigatorId: responderId,
+      investigatorName: responder?.name,
+      auditTrail: [...(r.auditTrail ?? []), `Ops dispatched ${responder?.name ?? responderId} to investigate.`],
+    }));
+    patchResponder(responderId, (r) => ({ ...r, status: 'en_route' }));
+    pushLog({
+      actorId: selfResponderId, actorRole: 'ops', action: 'report.dispatched', targetId: reportId,
+      message: `Ops dispatched ${responder?.name ?? responderId} to investigate "${report.title}".`,
+      severity: 2, visibleTo: ['ops', 'responder'],
+    });
+    pushNotification({
+      tier: 'watch', roles: ['responder'], title: 'Investigation assigned',
+      body: `Ops asked you to check: ${report.title}.`, targetId: reportId,
+    });
+  };
+
+  // The assigned responder closes the investigation with an outcome.
+  const resolveInvestigation: AppState['resolveInvestigation'] = (reportId, outcome) => {
+    const task = investigations.find((t) => t.id === reportId);
+    // The responder owns the investigation (operations cluster) but can't write
+    // to the citizen's report (intake is ops-scoped) — ops reflects the closure
+    // back onto the report (see the ops effect below).
+    csot.put('operations', 'investigation', reportId, { ...(task as InvestigationTask), status: 'resolved', outcome });
+    patchResponder(selfResponderId, (r) => ({ ...r, status: 'ready' }));
+    pushLog({
+      actorId: selfResponderId, actorRole: 'responder', action: 'report.investigated', targetId: reportId,
+      message: `Investigation closed: ${outcome || 'resolved'}.`, severity: 2, visibleTo: ['ops', 'responder'],
+    });
+    // Citizen-reported investigations notify the reporter; ops-originated ones
+    // (no backing report) report back to ops instead.
+    if (task?.reportId) {
+      pushNotification({
+        tier: 'info', roles: ['citizen'], title: 'Report checked',
+        body: `A responder checked your report. ${outcome || ''}`.trim(), targetId: reportId,
+      });
+    } else {
+      pushNotification({
+        tier: 'info', roles: ['ops'], title: 'Investigation closed',
+        body: `${task?.title ?? 'Investigation'} · ${outcome || 'resolved'}`, targetId: reportId,
+      });
+    }
+  };
+
+  // Ops blocks/terminates an SOS case it deems fake or unneeded. Tears down the
+  // private room and frees any responders who had joined.
+  const terminateSos: AppState['terminateSos'] = (sosId, reason) => {
+    patchSos(sosId, (s) => ({ ...s, status: 'cancelled', finalReport: `Terminated by ops: ${reason}` }));
+    for (const m of csot.collectionByPrefix<CaseMember>(`csot/case/${sosId}/member/`)) {
+      patchResponder(m.id, (r) => (r.assignedSosId === sosId ? { ...r, status: 'ready', assignedSosId: undefined } : r));
+    }
+    teardownCaseRoom(sosId);
+    pushLog({
+      actorId: selfResponderId, actorRole: 'ops', action: 'sos.terminated', targetId: sosId,
+      message: `Ops terminated ${sosId} (${reason}).`, severity: 3, visibleTo: ['ops', 'responder', 'citizen'],
+    });
+    pushNotification({
+      tier: 'info', roles: ['citizen'], title: 'SOS closed by ops',
+      body: `Ops closed this SOS: ${reason}.`, targetId: sosId,
+    });
+  };
+
+  // Clean close (handled). Mirrors terminateSos but resolves rather than cancels,
+  // so it reads as "we dealt with it" — the proper end for an ops-declared case
+  // (which has no citizen to complete the dual-ack) or any case ops confirms done.
+  const standDownSos: AppState['standDownSos'] = (sosId) => {
+    const sos = sosSessions.find((s) => s.id === sosId);
+    patchSos(sosId, (s) => ({ ...s, status: 'resolved', finalReport: 'Stood down by ops — handled.' }));
+    for (const m of csot.collectionByPrefix<CaseMember>(`csot/case/${sosId}/member/`)) {
+      patchResponder(m.id, (r) => (r.assignedSosId === sosId ? { ...r, status: 'ready', assignedSosId: undefined } : r));
+    }
+    teardownCaseRoom(sosId);
+    pushLog({
+      actorId: selfResponderId, actorRole: 'ops', action: 'sos.stood_down', targetId: sosId,
+      message: `Ops stood down ${sos?.category ?? 'the'} case ${sosId} (handled).`, severity: 2, visibleTo: ['ops', 'responder', 'citizen'],
+    });
+    pushNotification({
+      tier: 'info', roles: ['responder'], title: 'Case stood down',
+      body: `Ops marked ${sos?.citizenName ?? sosId} resolved. Thanks for responding.`, targetId: sosId,
+    });
+  };
+
   const startSos: AppState['startSos'] = (s) => {
     const id = newId('SOS');
-    api.createSos({ citizenName: s.citizenName, category: s.category, location: s.location }).catch(() => {});
-    setSosSessions((prev) => [
-      { ...s, id, status: 'requesting', startedAt: Date.now() },
-      ...prev,
-    ]);
+    // PUBLIC signal: discoverable by responders + ops, owner-scoped away from
+    // other citizens. Carries NO aid card / phone — those live in the private
+    // case room and are revealed only to responders who JOIN.
+    putSos({
+      id,
+      ownerId: selfResponderId,
+      citizenName: s.citizenName,
+      category: s.category,
+      details: s.details,
+      location: s.location,
+      status: 'requesting',
+      memberCount: 0,
+      startedAt: Date.now(),
+    });
+    // PRIVATE case room: only the owner (subscribing now) and joined responders
+    // (subscribing on join) receive it. Holds aid card + contact, live member
+    // tracking, and the group chat.
+    csot.subscribeTopic(`csot/case/${id}/#`);
+    csot.publishTopic(`csot/case/${id}/info`, {
+      ownerName: s.citizenName,
+      category: s.category,
+      phone: s.phone ?? selfUser?.phone,
+      aidCard: aidCard ?? undefined,
+    } satisfies SosCaseDetails);
     pushLog({
-      actorId: 'U-CIV-1',
+      actorId: selfResponderId,
       actorRole: 'citizen',
       action: 'sos.created',
       targetId: id,
-      message: `${s.category} SOS created. Routed to ops and responder pool because SOS is highest priority.`,
+      message: `${s.citizenName} opened a ${s.category} SOS. On-duty responders within range are recommended to join.`,
       severity: 4,
       visibleTo: ['ops', 'responder', 'citizen'],
     });
     pushNotification({
       tier: 'critical',
-      roles: ['ops', 'responder'],
-      title: `SOS ${s.category}`,
-      body: 'Citizen SOS is open. Responders should check fit score before accepting.',
+      roles: ['ops'],
+      title: `SOS · ${s.category}`,
+      body: `${s.citizenName} raised a ${s.category} SOS. Responders nearby are being recommended to join.`,
       targetId: id,
-    });
-    pushNotification({
-      tier: 'critical',
-      roles: ['citizen'],
-      title: 'SOS sent',
-      body: 'Ops and suitable responders have been notified. Keep this screen open for status updates.',
-      targetId: id,
-    });
-    setTracking({
-      kind: 'SOS LIVE',
-      title: 'Help is on the way',
-      eta: 'searching',
-      progress: 0.1,
-      tone: 'critical',
-      drawerId: 'sos_live',
     });
     return id;
   };
-  const assignSos: AppState['assignSos'] = (sosId, responderId) => {
-    api.patchSos(sosId, { status: 'acknowledged', assignedResponderId: responderId }).catch(() => {});
-    api.patchResponder(responderId, { status: 'en_route', assignedSosId: sosId }).catch(() => {});
-    const responder = responders.find((r) => r.id === responderId);
-    const sos = sosSessions.find((s) => s.id === sosId);
-    setSosSessions((prev) =>
-      prev.map((s) =>
-        s.id === sosId ? { ...s, status: 'ack', assignedResponderId: responderId } : s
-      )
-    );
-    setResponders((prev) =>
-      prev.map((r) =>
-        r.id === responderId ? { ...r, status: 'en_route', assignedSosId: sosId } : r
-      )
-    );
+
+  // Responder JOINS an SOS case: subscribe to the private room, publish self as a
+  // live member, flip the public signal to "active". Joining is what reveals the
+  // aid card (the private room) — there is no separate accept/dispatch step.
+  const joinSosCase: AppState['joinSosCase'] = (sosId) => {
+    const sos = sosSessions.find((x) => x.id === sosId);
+    const loc = selfLocation ?? selfResponder?.location ?? { lng: 103.8198, lat: 1.3521 };
+    const eta = sos ? etaFromDistanceKm(getDistanceKm(loc, sos.location)) : undefined;
+    csot.subscribeTopic(`csot/case/${sosId}/#`);
+    csot.publishTopic(`csot/case/${sosId}/member/${selfResponderId}`, {
+      id: selfResponderId,
+      name: selfName || 'Responder',
+      role: 'responder',
+      proficiencies: selfResponder?.proficiencies ?? [],
+      location: loc,
+      status: 'en_route',
+      eta,
+      joinedAt: Date.now(),
+    } satisfies CaseMember);
+    setJoinedCaseIds((prev) => new Set(prev).add(sosId));
+    patchResponder(selfResponderId, (r) => ({ ...r, status: 'en_route', assignedSosId: sosId }));
+    patchSos(sosId, (x) => ({
+      ...x,
+      status: 'active',
+      memberCount: csot.collectionByPrefix(`csot/case/${sosId}/member/`).length,
+    }));
     pushLog({
-      actorId: responderId,
-      actorRole: responder?.unitType === 'professional' ? 'ops' : 'responder',
-      action: 'sos.accepted',
+      actorId: selfResponderId,
+      actorRole: 'responder',
+      action: 'sos.joined',
       targetId: sosId,
-      message: `${responder?.name ?? responderId} accepted/responding to ${sos?.category ?? 'SOS'}.`,
+      message: `${selfName || 'A responder'} joined the ${sos?.category ?? 'SOS'} case.`,
       severity: 4,
       visibleTo: ['ops', 'responder', 'citizen'],
     });
-    pushNotification({
-      tier: 'critical',
-      roles: ['citizen', 'ops'],
-      title: 'Responder assigned',
-      body: `${responder?.name ?? responderId} is en route. Arrival and resolution require acknowledgements.`,
-      targetId: sosId,
-    });
-    const distKm = responder && sos ? getDistanceKm(responder.location, sos.location) : null;
-    setTracking({
-      kind: 'SOS LIVE',
-      title: distKm !== null
-        ? `Responder en route · ETA ${etaFromDistanceKm(distKm)}`
-        : 'Responder en route',
-      eta: distKm !== null ? etaFromDistanceKm(distKm) : 'computing',
-      progress: 0.35,
-      tone: 'critical',
-      drawerId: 'sos_live',
-    });
-    setLiveTracking(true);
   };
-  const advanceSos: AppState['advanceSos'] = (sosId, to) => {
-    const sos = sosSessions.find((s) => s.id === sosId);
-    api.patchSos(sosId, { status: to }).catch(() => {});
-    setSosSessions((prev) => prev.map((s) => (s.id === sosId ? { ...s, status: to } : s)));
-    if (sos?.assignedResponderId) {
-      setResponders((prev) =>
-        prev.map((r) => {
-          if (r.id !== sos.assignedResponderId) return r;
-          if (to === 'arrived' || to === 'resolving') return { ...r, status: 'on_scene' };
-          if (to === 'resolved' || to === 'cancelled') return { ...r, status: 'ready', assignedSosId: undefined };
-          if (to === 'en_route' || to === 'ack') return { ...r, status: 'en_route' };
-          return r;
-        })
-      );
-    }
-    const responder = sos?.assignedResponderId
-      ? responders.find((r) => r.id === sos.assignedResponderId)
-      : null;
-    const distKm = responder && sos ? getDistanceKm(responder.location, sos.location) : null;
-    const liveEta = distKm !== null ? etaFromDistanceKm(distKm) : 'computing';
-    const map: Record<string, TrackingState> = {
-      en_route: {
-        kind: 'SOS LIVE',
-        title: `Responder en route · ETA ${liveEta}`,
-        eta: liveEta,
-        progress: 0.55,
-        tone: 'critical',
-        drawerId: 'sos_live',
-      },
-      arrived: { kind: 'SOS LIVE', title: 'Responder arrived', eta: 'now', progress: 0.85, tone: 'critical', drawerId: 'sos_live' },
-      resolving: { kind: 'SOS LIVE', title: 'Confirming resolution', eta: 'ack needed', progress: 0.92, tone: 'warning', drawerId: 'sos_live' },
-      resolved: { kind: 'SOS LIVE', title: 'Resolved', eta: '—', progress: 1, tone: 'neutral', drawerId: 'sos_live' },
-    };
-    if (map[to]) setTracking(map[to]);
-    if (to === 'resolved') setTimeout(() => setTracking(null), 2500);
+
+  const leaveSosCase: AppState['leaveSosCase'] = (sosId) => {
+    csot.removeTopic(`csot/case/${sosId}/member/${selfResponderId}`);
+    csot.unsubscribeTopic(`csot/case/${sosId}/#`);
+    setJoinedCaseIds((prev) => { const n = new Set(prev); n.delete(sosId); return n; });
+    patchResponder(selfResponderId, (r) => ({ ...r, status: 'ready', assignedSosId: undefined }));
+    patchSos(sosId, (x) => {
+      const remaining = csot.collectionByPrefix(`csot/case/${sosId}/member/`).length;
+      return { ...x, memberCount: remaining, status: remaining === 0 && x.status === 'active' ? 'requesting' : x.status };
+    });
     pushLog({
-      actorId: sos?.assignedResponderId ?? 'system',
-      actorRole: sos?.assignedResponderId ? 'responder' : 'system',
-      action: `sos.${to}`,
+      actorId: selfResponderId,
+      actorRole: 'responder',
+      action: 'sos.left',
       targetId: sosId,
-      message: `${sosId} moved to ${to}.`,
-      severity: to === 'resolved' ? 2 : 4,
+      message: `${selfName || 'A responder'} left the case.`,
+      severity: 2,
       visibleTo: ['ops', 'responder', 'citizen'],
     });
   };
+
+  // A joined responder marks themselves on scene.
+  const markArrived: AppState['markArrived'] = (sosId) => {
+    const me = csot
+      .collectionByPrefix<CaseMember>(`csot/case/${sosId}/member/`)
+      .find((m) => m.id === selfResponderId);
+    if (!me) return;
+    csot.publishTopic(`csot/case/${sosId}/member/${selfResponderId}`, { ...me, status: 'arrived', eta: 'now' });
+    patchResponder(selfResponderId, (r) => ({ ...r, status: 'on_scene' }));
+  };
+
+  // Group chat shared by the owner + joined responders — published into the
+  // private case room, so only participants (and ops) ever receive it.
+  const sendCaseChat: AppState['sendCaseChat'] = (sosId, text) => {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    const mid = newId('MSG');
+    csot.publishTopic(`csot/case/${sosId}/chat/${mid}`, {
+      id: mid,
+      caseId: sosId,
+      authorId: selfResponderId,
+      authorName: selfName || (role === 'citizen' ? 'You' : 'Responder'),
+      authorRole: role,
+      kind: 'message',
+      text: trimmed,
+      ts: Date.now(),
+    } satisfies ChatEntry);
+  };
+
+  function teardownCaseRoom(sosId: string) {
+    for (const m of csot.collectionByPrefix<CaseMember>(`csot/case/${sosId}/member/`)) {
+      csot.removeTopic(`csot/case/${sosId}/member/${m.id}`);
+    }
+    for (const ch of csot.collectionByPrefix<ChatEntry>(`csot/case/${sosId}/chat/`)) {
+      csot.removeTopic(`csot/case/${sosId}/chat/${ch.id}`);
+    }
+    csot.removeTopic(`csot/case/${sosId}/info`);
+    csot.unsubscribeTopic(`csot/case/${sosId}/#`);
+  }
+
+  // Dual-ack resolution: the citizen taps "I'm safe", a responder taps
+  // "Resolved". When both have, the case closes and the private room is torn down.
   const confirmSosSafe: AppState['confirmSosSafe'] = (sosId, by) => {
     const sos = sosSessions.find((s) => s.id === sosId);
     if (!sos) return;
     const nextCitizen = by === 'citizen' ? true : !!sos.citizenConfirmedSafe;
     const nextResponder = by === 'responder' ? true : !!sos.responderConfirmedSafe;
     const resolved = nextCitizen && nextResponder;
-    setSosSessions((prev) =>
-      prev.map((s) =>
-        s.id === sosId
-          ? {
-              ...s,
-              status: resolved ? 'resolved' : 'resolving',
-              citizenConfirmedSafe: nextCitizen,
-              responderConfirmedSafe: nextResponder,
-              finalReport: resolved
-                ? 'Citizen and responder both acknowledged completion. Ops can audit in logs.'
-                : s.finalReport,
-            }
-          : s
-      )
-    );
-    if (resolved && sos.assignedResponderId) {
-      setResponders((prev) =>
-        prev.map((r) =>
-          r.id === sos.assignedResponderId ? { ...r, status: 'ready', assignedSosId: undefined } : r
-        )
-      );
-      setTracking({ kind: 'SOS LIVE', title: 'Resolved', eta: '2 ack', progress: 1, tone: 'neutral', drawerId: 'sos_live' });
-      setTimeout(() => setTracking(null), 2500);
-    } else {
-      setTracking({
-        kind: 'SOS LIVE',
-        title: by === 'citizen' ? 'Citizen safe ack received' : 'Responder completion ack received',
-        eta: 'second ack needed',
-        progress: 0.94,
-        tone: 'warning',
-        drawerId: 'sos_live',
-      });
+    patchSos(sosId, (s) => ({
+      ...s,
+      status: resolved ? 'resolved' : s.status,
+      citizenConfirmedSafe: nextCitizen,
+      responderConfirmedSafe: nextResponder,
+      finalReport: resolved ? 'Citizen and a responder both confirmed safe.' : s.finalReport,
+    }));
+    if (resolved) {
+      for (const m of csot.collectionByPrefix<CaseMember>(`csot/case/${sosId}/member/`)) {
+        patchResponder(m.id, (r) => (r.assignedSosId === sosId ? { ...r, status: 'ready', assignedSosId: undefined } : r));
+      }
+      teardownCaseRoom(sosId);
     }
     pushLog({
-      actorId: by === 'citizen' ? 'U-CIV-1' : sos.assignedResponderId ?? SELF_ID,
+      actorId: selfResponderId,
       actorRole: by,
       action: 'sos.completion_ack',
       targetId: sosId,
-      message: `${by} acknowledged SOS completion. ${resolved ? 'SOS resolved.' : 'Waiting for second acknowledgement.'}`,
+      message: `${by} confirmed safe. ${resolved ? 'Case resolved.' : 'Waiting for the other side.'}`,
       severity: resolved ? 2 : 4,
       visibleTo: ['ops', 'responder', 'citizen'],
     });
-    pushNotification({
-      tier: resolved ? 'info' : 'urgent',
-      roles: ['ops', by === 'citizen' ? 'responder' : 'citizen'],
-      title: resolved ? 'SOS resolved' : 'SOS completion needs second ack',
-      body: `${sosId}: ${by} acknowledged completion.`,
-      targetId: sosId,
-    });
   };
 
-  const messageCitizen: AppState['messageCitizen'] = (targetId, responderId, text) => {
-    const trimmed = text.trim();
-    if (!trimmed) return;
-    const responder = responders.find((r) => r.id === responderId);
-    const sos = sosSessions.find((s) => s.id === targetId);
-    const caseRoom = cases.find((c) => c.id === targetId);
-    const targetLabel = sos
-      ? `${sos.id} (${sos.category})`
-      : caseRoom
-      ? `case ${caseRoom.name}`
-      : targetId;
-    pushLog({
-      actorId: responderId,
-      actorRole: 'responder',
-      action: 'citizen.message_sent',
-      targetId,
-      message: `${responder?.name ?? responderId} messaged the citizen/reporter for ${targetLabel}: ${trimmed}`,
-      severity: sos ? 4 : caseRoom?.severity,
-      visibleTo: ['ops', 'responder', 'citizen'],
-    });
-    pushNotification({
-      tier: sos || (caseRoom?.severity ?? 0) >= 4 ? 'urgent' : 'info',
-      roles: ['citizen'],
-      title: sos ? 'Responder message for your SOS' : 'Responder update for your report',
-      body: trimmed,
-      targetId,
-    });
-  };
   const cancelSos: AppState['cancelSos'] = (sosId) => {
-    setSosSessions((prev) => prev.map((s) => (s.id === sosId ? { ...s, status: 'cancelled' } : s)));
+    patchSos(sosId, (s) => ({ ...s, status: 'cancelled' }));
+    for (const m of csot.collectionByPrefix<CaseMember>(`csot/case/${sosId}/member/`)) {
+      patchResponder(m.id, (r) => (r.assignedSosId === sosId ? { ...r, status: 'ready', assignedSosId: undefined } : r));
+    }
+    teardownCaseRoom(sosId);
     pushLog({
-      actorId: 'U-CIV-1',
+      actorId: selfResponderId,
       actorRole: 'citizen',
       action: 'sos.cancelled',
       targetId: sosId,
-      message: `${sosId} cancelled by citizen before completion.`,
+      message: `${sosId} cancelled by the citizen.`,
       visibleTo: ['ops', 'responder', 'citizen'],
     });
-    setTracking(null);
   };
 
-  const declareIncident: AppState['declareIncident'] = (e) => {
-    const id = newId('EV');
-    api.createEvent({ kind: e.kind, title: e.title, severity: e.severity, location: e.location, area: e.area, source: e.source }).catch(() => {});
-    setEvents((prev) => [{ ...e, id, status: 'verified', createdAt: Date.now() }, ...prev]);
-    pushLog({
-      actorId: 'ops',
-      actorRole: 'ops',
-      action: 'incident.declared',
-      targetId: id,
-      message: `${e.title} declared by ops and published to role feeds.`,
-      severity: e.severity,
-      visibleTo: ['ops', 'responder'],
-    });
-    pushNotification({
-      tier: e.severity >= 4 ? 'urgent' : 'watch',
-      roles: ['citizen', 'responder', 'ops'],
-      title: `Incident declared: ${e.kind}`,
-      body: e.title,
-      targetId: id,
-    });
-    return id;
-  };
+  // Private case-room reads. Only populated for clients subscribed to the room
+  // (the owner + joined responders + ops) — empty for everyone else.
+  const caseMembers: AppState['caseMembers'] = (sosId) =>
+    csot
+      .collectionByPrefix<CaseMember>(`csot/case/${sosId}/member/`)
+      .filter((m) => m && m.id)
+      .sort((a, b) => a.joinedAt - b.joinedAt);
+  const caseChat: AppState['caseChat'] = (sosId) =>
+    csot.collectionByPrefix<ChatEntry>(`csot/case/${sosId}/chat/`).sort((a, b) => a.ts - b.ts);
+  const caseDetails: AppState['caseDetails'] = (sosId) =>
+    csot.collectionByPrefix<SosCaseDetails>(`csot/case/${sosId}/info`)[0];
 
-  const declareZone: AppState['declareZone'] = (z) => {
-    const id = newId('ZONE');
-    const zone: EmergencyZone = { ...z, id, status: 'declared', createdAt: Date.now() };
-    setZones((prev) => [zone, ...prev]);
-    setEvents((prev) => [
-      {
-        id: newId('EV'),
-        kind: z.kind === 'accident' ? 'crash' : z.kind === 'health' ? 'medical' : z.kind,
-        title: z.title,
-        severity: z.severity,
-        status: 'verified',
-        location: z.center,
-        area: z.area,
-        source: 'ops zone declaration',
-        createdAt: Date.now(),
-      },
-      ...prev,
-    ]);
-    pushLog({
-      actorId: z.declaredBy,
-      actorRole: 'ops',
-      action: 'zone.declared',
-      targetId: id,
-      message: `${z.title} declared with ${z.area.length} polygon points.`,
-      severity: z.severity,
-      visibleTo: ['ops', 'responder'],
-    });
-    return id;
-  };
-
-  const updateZoneStatus: AppState['updateZoneStatus'] = (zoneId, status) => {
-    setZones((prev) => prev.map((z) => (z.id === zoneId ? { ...z, status } : z)));
-    pushLog({
-      actorId: 'ops',
-      actorRole: 'ops',
-      action: `zone.${status}`,
-      targetId: zoneId,
-      message: `${zoneId} set to ${status}.`,
-      visibleTo: ['ops', 'responder'],
-    });
-  };
-
-  const assignIncident: AppState['assignIncident'] = (eventId, responderId) => {
-    const event = events.find((e) => e.id === eventId);
-    if (!event) return;
-    const responder = responders.find((r) => r.id === responderId);
-    const caseId = event.caseId ?? newId('CASE');
-    if (!event.caseId) {
-      setCases((prev) => [
-        {
-          id: caseId,
-          name: caseId.replace('CASE-', ''),
-          severity: event.severity,
-          centroid: event.location,
-          members: [responderId],
-          captain: responderId,
-          state: 'forming',
-          startedAt: Date.now(),
-          source: 'ops',
-        },
-        ...prev,
-      ]);
-      setEvents((prev) => prev.map((e) => (e.id === eventId ? { ...e, caseId } : e)));
-    } else {
-      setCases((prev) =>
-        prev.map((c) =>
-          c.id === caseId && !c.members.includes(responderId)
-            ? { ...c, members: [...c.members, responderId] }
-            : c
-        )
-      );
-    }
-    setResponders((prev) =>
-      prev.map((r) => (r.id === responderId ? { ...r, status: 'en_route' } : r))
-    );
-    setChat((prev) => [
-      ...prev,
-      {
-        id: newId('CH'),
-        caseId,
-        authorId: 'ops',
-        kind: 'system',
-        text: `${responder?.name ?? responderId} assigned to ${event.title}.`,
-        ts: Date.now(),
-      },
-    ]);
-    pushLog({
-      actorId: 'ops',
-      actorRole: 'ops',
-      action: 'incident.assigned',
-      targetId: eventId,
-      message: `${responder?.name ?? responderId} assigned to ${event.title}. Case ${caseId}.`,
-      severity: event.severity,
-      visibleTo: ['ops', 'responder'],
-    });
-    pushNotification({
-      tier: event.severity >= 4 ? 'urgent' : 'watch',
-      roles: ['responder'],
-      title: 'Mission assigned',
-      body: `${event.title}. Open assignment detail or case room.`,
-      targetId: caseId,
-    });
-  };
-
-  const toggleDuty: AppState['toggleDuty'] = (responderId, on) => {
-    setResponders((prev) =>
-      prev.map((r) => (r.id === responderId ? { ...r, status: on ? 'ready' : 'out' } : r))
-    );
-    pushLog({
-      actorId: responderId,
-      actorRole: 'responder',
-      action: 'responder.duty',
-      targetId: responderId,
-      message: `${responderId} went ${on ? 'on' : 'off'} duty.`,
-      visibleTo: ['ops', 'responder'],
-    });
-  };
-
-  const updateResponderStatus: AppState['updateResponderStatus'] = (responderId, status) => {
-    api.patchResponder(responderId, { status }).catch(() => {});
-    setResponders((prev) => prev.map((r) => (r.id === responderId ? { ...r, status } : r)));
-    pushLog({
-      actorId: 'ops',
-      actorRole: 'ops',
-      action: 'responder.status',
-      targetId: responderId,
-      message: `${responderId} status set to ${status}.`,
-      visibleTo: ['ops', 'responder'],
-    });
-  };
-
-  const updateSelfProfile: AppState['updateSelfProfile'] = (patch) =>
-    setUsers((prev) => prev.map((u) => (u.id === SELF_ID ? { ...u, ...patch } : u)));
-
-  const updateUserProfile: AppState['updateUserProfile'] = (userId, patch) =>
-    setUsers((prev) => prev.map((u) => (u.id === userId ? { ...u, ...patch } : u)));
-
-  const createVolunteerEvent: AppState['createVolunteerEvent'] = (e) => {
-    const id = newId('VOL');
-    setVolunteerEvents((prev) => [
-      { ...e, id, registeredResponderIds: [], status: 'upcoming', createdAt: Date.now() },
-      ...prev,
-    ]);
-    pushLog({
-      actorId: e.organizer,
-      actorRole: e.organizerRole === 'ops' ? 'ops' : 'citizen',
-      action: 'volunteer_event.created',
-      targetId: id,
-      message: `${e.title} created by ${e.organizer}.`,
-      visibleTo: ['ops', 'responder'],
-    });
-    return id;
-  };
-
-  const joinVolunteerEvent: AppState['joinVolunteerEvent'] = (eventId, responderId) => {
-    setVolunteerEvents((prev) =>
-      prev.map((e) =>
-        e.id === eventId && !e.registeredResponderIds.includes(responderId)
-          ? { ...e, registeredResponderIds: [...e.registeredResponderIds, responderId] }
-          : e
-      )
-    );
-    pushLog({
-      actorId: responderId,
-      actorRole: 'responder',
-      action: 'volunteer_event.registered',
-      targetId: eventId,
-      message: `${responderId} registered for volunteer event ${eventId}.`,
-      visibleTo: ['ops', 'responder'],
-    });
-  };
-
-  const unregisterVolunteerEvent: AppState['unregisterVolunteerEvent'] = (eventId, responderId) => {
-    setVolunteerEvents((prev) =>
-      prev.map((e) =>
-        e.id === eventId
-          ? { ...e, registeredResponderIds: e.registeredResponderIds.filter((id) => id !== responderId) }
-          : e
-      )
-    );
-    pushLog({
-      actorId: responderId,
-      actorRole: 'responder',
-      action: 'volunteer_event.unregistered',
-      targetId: eventId,
-      message: `${responderId} unregistered from volunteer event ${eventId}.`,
-      visibleTo: ['ops', 'responder'],
-    });
+  const updateSelfProfile: AppState['updateSelfProfile'] = (patch) => {
+    const id = csot.identity?.userId;
+    if (!id) return;
+    const cur = csot.collection<AppUser>('network', 'user').find((u) => u.id === id);
+    if (cur) csot.put('network', 'user', id, { ...cur, ...patch });
   };
 
   const sendChat: AppState['sendChat'] = (caseId, authorId, text) => {
     const id = newId('CH');
-    setChat((prev) => [
-      ...prev,
-      { id, caseId, authorId, kind: 'message', text, ts: Date.now() },
-    ]);
+    putChat({ id, caseId, authorId, kind: 'message', text, ts: Date.now() });
     if (text.toLowerCase().startsWith('/host')) {
       setTimeout(() => askHost(caseId, text), 400);
     }
@@ -1074,7 +1156,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
 
     // /host new pings?
     if (q.includes('ping') || q.includes('new')) {
-      const open = sosSessions.filter((s) => !['resolved', 'cancelled'].includes(s.status) && !s.assignedResponderId);
+      const open = sosSessions.filter((s) => !['resolved', 'cancelled'].includes(s.status) && (s.memberCount ?? 0) === 0);
       if (!caseRoom || open.length === 0) {
         return { text: open.length === 0 ? 'No unassigned SOS pings.' : 'No active case to compare against.', chips: [{ label: 'tool: sos_queue', ref: `${open.length}` }] };
       }
@@ -1109,7 +1191,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
 
     // /host pause watchdog 10m — captain-only acknowledgement; no real watchdog wired
     if (q.includes('pause') || q.includes('watchdog')) {
-      const isCaptain = caseRoom?.captain === SELF_ID;
+      const isCaptain = caseRoom?.captain === selfResponderId;
       if (!isCaptain) return { text: 'Pause watchdog: captain-only command.', chips: [{ label: 'tool: watchdog', ref: 'denied' }] };
       const until = new Date(Date.now() + 10 * 60_000).toLocaleTimeString();
       return { text: `Watchdog mute acknowledged until ${until}. (Local-only; no proactive watchdog yet wired.)`, chips: [{ label: 'tool: watchdog', ref: 'muted_local' }] };
@@ -1155,7 +1237,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       .slice(-8)
       .map((c) => ({ author: c.authorId, kind: c.kind, text: c.text.slice(0, 140), ts: c.ts }));
     const openSos = sosSessions
-      .filter((s) => !['resolved', 'cancelled'].includes(s.status) && !s.assignedResponderId)
+      .filter((s) => !['resolved', 'cancelled'].includes(s.status) && (s.memberCount ?? 0) === 0)
       .map((s) => ({ id: s.id, category: s.category, status: s.status, location: s.location }));
     askHostAi({
       role,
@@ -1168,283 +1250,24 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
         sos: openSos,
         chatRecent: recentChat,
         liveSnapshot: liveSnapshot ? { psi: liveSnapshot.psi?.[0] ?? null } : null,
-        selfResponderId: SELF_ID,
+        selfResponderId,
       },
     })
       .then((reply) => {
         const entry = reply.state === 'live'
           ? { text: reply.text, chips: reply.chips }
           : fallbackHost(query, caseId);
-        setChat((prev) => [
-          ...prev,
-          { id, caseId, authorId: 'host', kind: 'host', ...entry, ts: Date.now() },
-        ]);
+        putChat({ id, caseId, authorId: 'host', kind: 'host', ...entry, ts: Date.now() });
       })
       .catch(() => {
         const fallback = fallbackHost(query, caseId);
-        setChat((prev) => [
-          ...prev,
-          { id, caseId, authorId: 'host', kind: 'host', text: fallback.text, chips: fallback.chips, ts: Date.now() },
-        ]);
+        putChat({ id, caseId, authorId: 'host', kind: 'host', text: fallback.text, chips: fallback.chips, ts: Date.now() });
       });
-  };
-
-  const joinGroup: AppState['joinGroup'] = (groupId, responderId) => {
-    setGroups((prev) =>
-      prev.map((g) =>
-        g.id === groupId && !g.members.includes(responderId)
-          ? { ...g, members: [...g.members, responderId] }
-          : g
-      )
-    );
-    setResponders((prev) =>
-      prev.map((r) =>
-        r.id === responderId && !r.groups.includes(groupId)
-          ? { ...r, groups: [...r.groups, groupId] }
-          : r
-      )
-    );
-  };
-  const leaveGroup: AppState['leaveGroup'] = (groupId, responderId) => {
-    setGroups((prev) =>
-      prev.map((g) =>
-        g.id === groupId ? { ...g, members: g.members.filter((m) => m !== responderId) } : g
-      )
-    );
-    setResponders((prev) =>
-      prev.map((r) =>
-        r.id === responderId ? { ...r, groups: r.groups.filter((g) => g !== groupId) } : r
-      )
-    );
-  };
-
-  const joinCase: AppState['joinCase'] = (caseId, responderId) => {
-    const caseRoom = cases.find((c) => c.id === caseId);
-    if (caseRoom?.restricted) {
-      pushLog({
-        actorId: responderId,
-        actorRole: 'responder',
-        action: 'case.join_blocked',
-        targetId: caseId,
-        message: `${caseRoom.name} is official-only. Volunteer join was blocked to avoid interference.`,
-        severity: caseRoom.severity,
-        visibleTo: ['ops', 'responder'],
-      });
-      pushNotification({
-        tier: 'watch',
-        roles: ['responder'],
-        title: 'Official case is restricted',
-        body: `${caseRoom.name} can be monitored for deconfliction, but volunteers cannot join it.`,
-        targetId: caseId,
-      });
-      return;
-    }
-    setCases((prev) =>
-      prev.map((c) =>
-        c.id === caseId && !c.members.includes(responderId)
-          ? { ...c, members: [...c.members, responderId] }
-          : c
-      )
-    );
-    if (caseRoom && !caseRoom.members.includes(responderId)) {
-      api.patchCase(caseId, { members: [...caseRoom.members, responderId] }).catch(() => {});
-    }
-    setLiveTracking(true);
-    pushLog({
-      actorId: responderId,
-      actorRole: 'responder',
-      action: 'case.joined',
-      targetId: caseId,
-      message: `${responderId} joined case ${caseRoom?.name ?? caseId}.`,
-      severity: caseRoom?.severity,
-      visibleTo: ['ops', 'responder'],
-    });
-  };
-  const leaveCase: AppState['leaveCase'] = (caseId, responderId) => {
-    const caseRoom = cases.find((c) => c.id === caseId);
-    setCases((prev) =>
-      prev.map((c) =>
-        c.id === caseId ? { ...c, members: c.members.filter((m) => m !== responderId) } : c
-      )
-    );
-    if (caseRoom) {
-      api.patchCase(caseId, { members: caseRoom.members.filter((m) => m !== responderId) }).catch(() => {});
-    }
-    pushLog({
-      actorId: responderId,
-      actorRole: 'responder',
-      action: 'case.left',
-      targetId: caseId,
-      message: `${responderId} left case ${caseId}.`,
-      visibleTo: ['ops', 'responder'],
-    });
-  };
-
-  const requestCaseFormation: AppState['requestCaseFormation'] = (eventId, responderId) => {
-    const event = events.find((e) => e.id === eventId);
-    // Tag the event with the request so the ops Case Requests queue can pick it up.
-    setEvents((prev) =>
-      prev.map((e) =>
-        e.id === eventId
-          ? { ...e, caseRequestedBy: responderId, caseRequestedAt: Date.now() }
-          : e
-      )
-    );
-    pushLog({
-      actorId: responderId,
-      actorRole: 'responder',
-      action: 'case.requested',
-      targetId: eventId,
-      message: `${responderId} requested ops to form a case around ${event?.title ?? eventId}.`,
-      severity: event?.severity,
-      visibleTo: ['ops', 'responder'],
-    });
-    pushNotification({
-      tier: event && event.severity >= 4 ? 'urgent' : 'watch',
-      roles: ['ops'],
-      title: 'Responder requested case formation',
-      body: `${event?.title ?? eventId}. Open the Requests queue to form or decline.`,
-      targetId: eventId,
-    });
-  };
-
-  const acceptCaseFormation: AppState['acceptCaseFormation'] = (eventId) => {
-    const event = events.find((e) => e.id === eventId);
-    if (!event || !event.caseRequestedBy) return;
-    const requesterId = event.caseRequestedBy;
-    // assignIncident creates a case keyed to the event and adds the responder
-    // as a member (and captain, since they're the first in). It also fires
-    // the standard notifications + log entries.
-    assignIncident(eventId, requesterId);
-    // Clear the request markers — the case now lives in operations.cases.
-    setEvents((prev) =>
-      prev.map((e) =>
-        e.id === eventId
-          ? { ...e, caseRequestedBy: undefined, caseRequestedAt: undefined }
-          : e
-      )
-    );
-    pushLog({
-      actorId: 'ops',
-      actorRole: 'ops',
-      action: 'case.request_accepted',
-      targetId: eventId,
-      message: `Ops accepted case request from ${requesterId} on ${event.title}.`,
-      severity: event.severity,
-      visibleTo: ['ops', 'responder'],
-    });
-    pushNotification({
-      tier: event.severity >= 4 ? 'urgent' : 'watch',
-      roles: ['responder'],
-      title: 'Case request accepted',
-      body: `Ops formed a case for ${event.title}. You've been added as captain.`,
-      targetId: eventId,
-    });
-  };
-
-  const declineCaseFormation: AppState['declineCaseFormation'] = (eventId, reason) => {
-    const event = events.find((e) => e.id === eventId);
-    if (!event || !event.caseRequestedBy) return;
-    const requesterId = event.caseRequestedBy;
-    setEvents((prev) =>
-      prev.map((e) =>
-        e.id === eventId
-          ? { ...e, caseRequestedBy: undefined, caseRequestedAt: undefined }
-          : e
-      )
-    );
-    pushLog({
-      actorId: 'ops',
-      actorRole: 'ops',
-      action: 'case.request_declined',
-      targetId: eventId,
-      message: `Ops declined case request from ${requesterId} on ${event.title}.${reason ? ' Reason: ' + reason : ''}`,
-      severity: event.severity,
-      visibleTo: ['ops', 'responder'],
-    });
-    pushNotification({
-      tier: 'info',
-      roles: ['responder'],
-      title: 'Case request declined',
-      body: `Ops declined to form a case for ${event.title}.${reason ? ' Reason: ' + reason : ''}`,
-      targetId: eventId,
-    });
   };
 
   const updateResponderLocation: AppState['updateResponderLocation'] = (responderId, loc) => {
-    setResponders((prev) =>
-      prev.map((r) => (r.id === responderId ? { ...r, location: loc } : r))
-    );
+    patchResponder(responderId, (r) => ({ ...r, location: loc }));
   };
-
-  const closeCase: AppState['closeCase'] = (caseId, finalReport) => {
-    const target = cases.find((c) => c.id === caseId);
-    setCases((prev) =>
-      prev.map((c) =>
-        c.id === caseId
-          ? {
-              ...c,
-              state: 'resolved',
-              closure: {
-                ...(c.closure ?? {}),
-                opsClosed: true,
-                finalReport,
-              },
-            }
-          : c
-      )
-    );
-    pushLog({
-      actorId: 'ops',
-      actorRole: 'ops',
-      action: 'case.closed',
-      targetId: caseId,
-      message: `Ops closed ${caseId}. Final report: ${finalReport || 'No note provided.'}`,
-      visibleTo: ['ops', 'responder'],
-    });
-    pushNotification({
-      tier: 'info',
-      roles: ['responder'],
-      title: `Case ${target?.name ?? caseId} closed`,
-      body: `Ops has closed this case. ${finalReport ? 'Final report: ' + finalReport : 'No additional notes.'}`,
-      targetId: caseId,
-    });
-    pushNotification({
-      tier: 'info',
-      roles: ['citizen'],
-      title: 'Incident resolved',
-      body: `The case linked to your area (${target?.name ?? caseId}) has been closed by ops. Thank you for your report.`,
-      targetId: caseId,
-    });
-  };
-
-  // Simulated responder movement
-  useEffect(() => {
-    const t = setInterval(() => {
-      setResponders((prev) =>
-        prev.map((r) => {
-          if (r.status !== 'en_route' || !r.assignedSosId) return r;
-          const sos = sosSessions.find((s) => s.id === r.assignedSosId);
-          if (!sos) return r;
-          const dx = sos.location.lng - r.location.lng;
-          const dy = sos.location.lat - r.location.lat;
-          const dist = Math.hypot(dx, dy);
-          if (dist < 0.0008) {
-            return { ...r, status: 'on_scene', location: sos.location };
-          }
-          const step = Math.min(0.0015, dist);
-          return {
-            ...r,
-            location: {
-              lng: r.location.lng + (dx / dist) * step,
-              lat: r.location.lat + (dy / dist) * step,
-            },
-          };
-        })
-      );
-    }, 600);
-    return () => clearInterval(t);
-  }, [sosSessions]);
 
   const briefingInView = useMemo(
     () =>
@@ -1452,242 +1275,45 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     [events, reports, sosSessions, cases, notifications, role],
   );
 
-  // ──────────────────────────────────────────────────────────────────
-  // God Mode — demo helpers. Each call still goes through the same
-  // pushLog/pushNotification pipeline so the action log stays honest.
-  // ──────────────────────────────────────────────────────────────────
-  const godSetSourceState: AppState['godSetSourceState'] = (sourceId, state) => {
-    setSources((prev) => prev.map((s) => (s.id === sourceId ? { ...s, state } : s)));
-    pushLog({
-      actorId: 'godmode',
-      actorRole: 'system',
-      action: 'godmode.source_state',
-      targetId: sourceId,
-      message: `Source ${sourceId} state set to ${state} via God Mode.`,
-      visibleTo: ['ops'],
-    });
-  };
-
-  const seedSamplePoints = [
-    { name: 'Bedok Central', lng: 103.9298, lat: 1.324 },
-    { name: 'Jurong East MRT', lng: 103.7423, lat: 1.3331 },
-    { name: 'Tampines hub', lng: 103.9447, lat: 1.3528 },
-    { name: 'AYE merge', lng: 103.79, lat: 1.28 },
-  ];
-
-  const godSeedScenario: AppState['godSeedScenario'] = (kind) => {
-    const pick = (i: number) => seedSamplePoints[i % seedSamplePoints.length];
-    const minor = () => {
-      const a = pick(0);
-      const b = pick(1);
-      const repId = newId('REP');
-      setReports((prev) => [
-        {
-          id: repId,
-          kind: 'hazard',
-          title: 'Loose debris on covered walkway',
-          body: `Demo seed · ${a.name}. Citizen reports tile fragments at pedestrian level.`,
-          location: { lng: a.lng, lat: a.lat },
-          reporterTrust: 0.6,
-          status: 'pending',
-          createdAt: Date.now(),
-          auditTrail: ['Seeded by God Mode for demo. Awaiting ops triage.'],
-        },
-        ...prev,
-      ]);
-      const evId = newId('EV');
-      setEvents((prev) => [
-        {
-          id: evId,
-          kind: 'crash',
-          title: 'Two-vehicle bump · slow lane',
-          severity: 2,
-          status: 'verified',
-          location: { lng: b.lng, lat: b.lat },
-          source: 'God Mode demo seed',
-          createdAt: Date.now(),
-        },
-        ...prev,
-      ]);
-    };
-    const major = () => {
-      minor();
-      const c = pick(2);
-      const d = pick(3);
-      const sosId = newId('SOS');
-      setSosSessions((prev) => [
-        {
-          id: sosId,
-          citizenName: 'Demo Citizen',
-          category: 'medical',
-          location: { lng: c.lng, lat: c.lat },
-          status: 'requesting',
-          startedAt: Date.now(),
-        },
-        ...prev,
-      ]);
-      const evId = newId('EV');
-      setEvents((prev) => [
-        {
-          id: evId,
-          kind: 'fire',
-          title: 'Demo · Industrial fire (4-storey shophouse)',
-          severity: 4,
-          status: 'verified',
-          location: { lng: d.lng, lat: d.lat },
-          source: 'God Mode demo seed',
-          createdAt: Date.now(),
-        },
-        ...prev,
-      ]);
-      pushNotification({
-        tier: 'critical',
-        roles: ['ops', 'responder'],
-        title: 'Demo · Major scenario seeded',
-        body: 'God Mode seeded a fire + medical SOS for presentation.',
-      });
-    };
-    if (kind === 'major') major();
-    else minor();
-    pushLog({
-      actorId: 'godmode',
-      actorRole: 'system',
-      action: `godmode.seed.${kind}`,
-      targetId: 'csot',
-      message: `Demo scenario "${kind}" seeded via God Mode.`,
-      visibleTo: ['ops', 'responder', 'citizen'],
-    });
-  };
-
-  // Roster seeding — fills out the responder pool so ops actually has a
-  // dispatchable team. Each responder gets a plausible org, role, status,
-  // location around Singapore, and group memberships matching their capability.
-  const godSeedRoster: AppState['godSeedRoster'] = () => {
-    // Locations spread across the island so distance-based fit scores vary
-    // depending on which incident ops dispatches against.
-    const spread: Array<{ name: string; lng: number; lat: number; org: Responder['org']; role: Responder['role']; unit: 'volunteer' | 'professional'; status: Responder['status']; groups: string[] }> = [
-      { name: 'SCDF-Alpha · Marine Parade',     lng: 103.905, lat: 1.302, org: 'SCDF',      role: 'fire',   unit: 'professional', status: 'ready',   groups: ['G-SCDF-EAST'] },
-      { name: 'SCDF-Bravo · Tampines',          lng: 103.943, lat: 1.353, org: 'SCDF',      role: 'fire',   unit: 'professional', status: 'ready',   groups: ['G-SCDF-EAST'] },
-      { name: 'SCDF-Charlie · Bedok',           lng: 103.929, lat: 1.324, org: 'SCDF',      role: 'search', unit: 'professional', status: 'ready',   groups: ['G-SCDF-EAST'] },
-      { name: 'SCDF Medic · Changi',            lng: 103.989, lat: 1.358, org: 'SCDF',      role: 'medic',  unit: 'professional', status: 'ready',   groups: ['G-SCDF-EAST', 'G-MEDIC-VOL'] },
-      { name: 'SPF Patrol · Bedok',             lng: 103.927, lat: 1.327, org: 'SPF',       role: 'aux',    unit: 'professional', status: 'ready',   groups: [] },
-      { name: 'SPF Patrol · Tampines',          lng: 103.944, lat: 1.349, org: 'SPF',       role: 'aux',    unit: 'professional', status: 'ready',   groups: [] },
-      { name: 'Medic · Dr. Lim',                lng: 103.85,  lat: 1.298, org: 'Medic',     role: 'medic',  unit: 'professional', status: 'ready',   groups: ['G-MEDIC-VOL'] },
-      { name: 'Medic · Dr. Tan',                lng: 103.78,  lat: 1.331, org: 'Medic',     role: 'medic',  unit: 'professional', status: 'ready',   groups: ['G-MEDIC-VOL'] },
-      { name: 'Vol · Auntie Mei (AED)',         lng: 103.94,  lat: 1.353, org: 'Volunteer', role: 'medic',  unit: 'volunteer',    status: 'ready',   groups: ['G-MEDIC-VOL', 'G-AED-RESP'] },
-      { name: 'Vol · Daniel (AED)',             lng: 103.853, lat: 1.302, org: 'Volunteer', role: 'medic',  unit: 'volunteer',    status: 'ready',   groups: ['G-AED-RESP'] },
-      { name: 'Vol · Mr. Tan (Fire Aux)',       lng: 103.79,  lat: 1.281, org: 'Volunteer', role: 'fire',   unit: 'volunteer',    status: 'ready',   groups: ['G-FIRE-VOL'] },
-      { name: 'Vol · Captain Lim (Fire Aux)',   lng: 103.81,  lat: 1.341, org: 'Volunteer', role: 'fire',   unit: 'volunteer',    status: 'standby' as never, groups: ['G-FIRE-VOL'] },
-    ];
-
-    const newResponders: Responder[] = spread.map((s, i) => ({
-      id: `R-DEMO-${(i + 1).toString().padStart(2, '0')}`,
-      name: s.name,
-      org: s.org,
-      role: s.role,
-      // Some statuses (e.g. 'standby') exist in the wireframe vocabulary but
-      // not in the Responder['status'] union — coerce defensively.
-      status: (['ready', 'en_route', 'on_scene', 'out', 'offline'] as Responder['status'][]).includes(s.status)
-        ? s.status
-        : 'ready',
-      location: { lng: s.lng, lat: s.lat },
-      groups: s.groups,
-      unitType: s.unit,
-      demo: true,
-    }));
-
-    // Replace existing demo responders (those whose id starts with R-DEMO-)
-    // but always keep SELF_ID so the responder workspace still works.
-    setResponders((prev) => {
-      const kept = prev.filter((r) => !r.id.startsWith('R-DEMO-'));
-      return [...kept, ...newResponders];
-    });
-
-    // Mirror group memberships back into the groups list so the Roster /
-    // Groups views render correctly without re-deriving on every paint.
-    setGroups((prev) =>
-      prev.map((g) => {
-        const memberIds = newResponders.filter((r) => r.groups.includes(g.id)).map((r) => r.id);
-        // Add to existing members (don't drop seed members or self if present).
-        const merged = Array.from(new Set([...g.members, ...memberIds]));
-        return { ...g, members: merged };
-      })
-    );
-
-    pushLog({
-      actorId: 'godmode',
-      actorRole: 'system',
-      action: 'godmode.roster_seeded',
-      targetId: 'operations.responders',
-      message: `Seeded ${newResponders.length} demo responders across SCDF, SPF, Medic, and Volunteer orgs.`,
-      visibleTo: ['ops'],
-    });
-  };
-
-  const godClearRoster: AppState['godClearRoster'] = () => {
-    setResponders((prev) => prev.filter((r) => !r.id.startsWith('R-DEMO-')));
-    setGroups((prev) =>
-      prev.map((g) => ({
-        ...g,
-        members: g.members.filter((id) => !id.startsWith('R-DEMO-')),
-      }))
-    );
-    pushLog({
-      actorId: 'godmode',
-      actorRole: 'system',
-      action: 'godmode.roster_cleared',
-      targetId: 'operations.responders',
-      message: 'Cleared demo responder roster.',
-      visibleTo: ['ops'],
-    });
-  };
-
-  const godResetCsot: AppState['godResetCsot'] = () => {
-    setReports([]);
-    setSosSessions([]);
-    setEvents([]);
-    setCases([]);
-    setChat([]);
-    setZones([]);
-    setVolunteerEvents([]);
-    setNotifications([]);
-    setActionLogs([]);
-    setSources(seedSources);
-    setResponders(seedResponders);
-    setTracking(null);
-    setDraftPolygon([]);
-    setSelectedId(null);
-    setSelectedMapItem(null);
-    setActiveCaseId(null);
-  };
-
   const value: AppState = {
     isAuthenticated,
     role,
     setRole,
-    demoLogin,
-    demoLogout,
+    selfName,
+    setSelfName,
+    join,
+    leave,
     pushNotification,
+    sendBroadcast,
+    declareNotice,
+    declareInvestigate,
+    declareCase,
     drawerContent,
     setDrawerContent,
     shellState,
     setShellState,
     events,
     reports,
+    investigations,
     sosSessions,
     responders,
     users,
-    zones,
-    volunteerEvents,
+    selfUser,
+    aidCard,
+    updateAidCard,
+    selfResponder,
+    setDuty,
+    setProficiencies,
+    onlineIds,
     cases,
     chat,
-    sources,
-    groups,
     liveSnapshot,
     notifications,
     actionLogs,
     selectedId,
     setSelectedId,
+    viewSosId,
+    setViewSosId,
     activeCaseId,
     setActiveCaseId,
     tracking,
@@ -1695,80 +1321,42 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     selectedMapItem,
     setSelectedMapItem,
     briefingInView,
-    selfResponderId: SELF_ID,
+    selfResponderId,
     fileReport,
-    claimReport,
     verifyReport,
     dismissReport,
+    dispatchReport,
+    resolveInvestigation,
+    terminateSos,
     startSos,
-    assignSos,
-    advanceSos,
+    standDownSos,
+    joinSosCase,
+    leaveSosCase,
+    markArrived,
+    sendCaseChat,
+    caseMembers,
+    caseChat,
+    caseDetails,
+    joinedCaseIds,
     confirmSosSafe,
     cancelSos,
-    messageCitizen,
-    declareIncident,
     resolveEvent: (eventId: string) => {
-      api.patchEvent(eventId, { status: 'resolved' }).catch(() => {});
-      setEvents((prev) => prev.filter((e) => e.id !== eventId));
+      // Mark resolved with a real retained message (not an empty-payload
+      // tombstone) — the map-marker effect + ops console both filter out
+      // 'resolved', so it disappears reliably on every client. Live weather
+      // overlays regenerate from NEA each pull, so they aren't resolvable here.
+      const ev = csot.collection<CanonicalEvent>('incidents', 'event').find((e) => e.id === eventId);
+      if (ev) putEvent({ ...ev, status: 'resolved' });
     },
-    declareZone,
-    updateZoneStatus,
-    assignIncident,
-    toggleDuty,
-    updateResponderStatus,
     updateSelfProfile,
-    updateUserProfile,
-    createVolunteerEvent,
-    joinVolunteerEvent,
-    unregisterVolunteerEvent,
     sendChat,
     askHost,
-    joinGroup,
-    leaveGroup,
-    joinCase,
-    leaveCase,
-    requestCaseFormation,
-    acceptCaseFormation,
-    declineCaseFormation,
-    closeCase,
     ackNotification,
     selfLocation,
     setSelfLocation,
     selfPlaceName,
-    liveTracking,
-    setLiveTracking,
     updateResponderLocation,
-    draftPolygon,
-    setDraftPolygon,
-    godSetSourceState,
-    godSeedScenario,
-    godSeedRoster,
-    godClearRoster,
-    godResetCsot,
   };
-
-  // Debug hook for Playwright / demo scripting. Available in dev + preview;
-  // not a security surface — only safe demo mutators are exposed.
-  if (typeof window !== 'undefined') {
-    (window as unknown as { __kk?: unknown }).__kk = {
-      role,
-      setRole,
-      demoLogin,
-      demoLogout,
-      setDrawerContent,
-      setSelectedId,
-      setActiveCaseId,
-      godSeedScenario,
-      godSeedRoster,
-      godClearRoster,
-      godResetCsot,
-      godSetSourceState,
-      acceptCaseFormation,
-      declineCaseFormation,
-      updateResponderLocation,
-      SELF_ID,
-    };
-  }
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 };
