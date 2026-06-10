@@ -1229,7 +1229,10 @@ export default function LiveDirector({ autostart, onExit }: { autostart: boolean
     };
     await wait(fast ? 80 : 500);
     await closeAiKaki(role);
-    while (!answered() && Date.now() < deadline) await whileWaiting();
+    // Always yield a macrotask each poll — otherwise an empty whileWaiting (e.g.
+    // Pondok) turns this into a microtask busy-loop that starves the iframe's
+    // network/render queue, so the AI reply never lands and the tab freezes.
+    while (!answered() && Date.now() < deadline) { await whileWaiting(); await wait(fast ? 80 : 250); }
     await waitFor(
       () => answered() ? document.body : null,
       `${agentName} answer`,
