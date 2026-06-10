@@ -9,131 +9,267 @@ including every data source we plan to wire (Tier A → D).
 
 ---
 
+## Features
+
+- **Role-Aware Interface**: Three distinct views for Citizen, Responder, and Ops roles
+- **Real Singapore Map**: OneMap grey tiles via MapLibre GL
+- **Live NEA Data**: PSI (Pollutant Standards Index) and rainfall overlays refreshed every 60 seconds
+- **Interactive Map Pins**: Events displayed at Bedok, AYE, and Tampines
+- **Drawing Tools** (Ops only): 11-tool drawing toolbox for marking areas
+- **Real-Time SOS**: Tracking pill appears for live SOS or assignment events
+- **Shared State Store**: Actions by one role immediately visible to others
+- **Case Room Chat**: Slash-command chat interface for responder groups
+- **AI-Powered Agents**: Ollama-powered Kaki agents for assisted responses
+
+---
+
 ## Prerequisites
 
-- **Node.js 18+** — https://nodejs.org
-- That's it. No accounts, no API keys, no Gemini setup required for this
-  section. The NEA endpoints we hit are public and CORS-open.
+- **Docker** (recommended) — https://www.docker.com/products/docker-desktop
+- **Node.js 18+** (alternative) — https://nodejs.org
+- **Ollama** (optional, for AI features) — https://ollama.com
 
 ---
 
-## One-shot build (recommended first run)
+## Quick Start (Docker - Recommended)
 
-Installs dependencies and produces a production bundle in `dist/`.
+### Setup
 
 ```bash
-# Linux / macOS
+# Clone the repository
+git clone https://github.com/kampung-kaki/CODEEXP.git
+cd CODEEXP
+
+# Run the full stack
+./start.sh
+```
+
+### Commands
+
+```bash
+./start.sh          # Build and run, follow logs in terminal
+./start.sh -d       # Run detached (background)
+./start.sh down     # Stop all services
+```
+
+### First Run
+
+On first run, `start.sh` automatically:
+1. Checks Docker is running
+2. Creates `.env.local` from `.env.example`
+3. Verifies Ollama is available (for AI features)
+4. Builds and starts all containers
+
+### Access
+
+- **App**: http://localhost:3000
+- **Live Demo**: http://localhost:3000/?demo=director&autostart=1
+- **MQTT**: tcp://localhost:1883 (bridge), ws://localhost:9001 (browsers)
+- **Redis**: localhost:6379
+- **Bridge API**: localhost:8787
+
+---
+
+## Manual Setup (Node.js - Alternative)
+
+### Setup
+
+```bash
+# Clone the repository
+git clone https://github.com/kampung-kaki/CODEEXP.git
+cd CODEEXP
+
+# Install dependencies and build
+chmod +x build.sh run.sh
 ./build.sh
-
-# Windows
-build.bat
 ```
 
-If `./build.sh` is not executable: `chmod +x build.sh run.sh`.
-
----
-
-## Run
-
-After `build.sh`, three modes:
+### Run
 
 ```bash
-./run.sh           # build (if needed) + preview on http://localhost:5173
-./run.sh dev       # vite dev server on http://localhost:3000 (hot reload)
-./run.sh share     # build + preview + public cloudflared tunnel
+./run.sh           # Build (if needed) + preview on http://localhost:5173
+./run.sh dev       # Vite dev server on http://localhost:3000 (hot reload)
+./run.sh share     # Build + preview + public Cloudflare tunnel
 ```
 
-Windows: `run.bat`, `run.bat dev`, `run.bat share`.
+### Access
 
-All commands kill anything already listening on `3000` / `4173` / `5173`
-before starting. The preview server binds to `0.0.0.0`, so anyone on
-your LAN can hit `http://<your-LAN-IP>:5173`.
+- **Preview**: http://localhost:5173
+- **Dev Server**: http://localhost:3000
+- **Public Share**: https://*.trycloudflare.com (via `./run.sh share`)
 
-### Share publicly (no signup)
+---
+
+## Environment Variables
+
+Copy `.env.example` to `.env.local` and configure as needed:
+
+| Variable | Description |
+|----------|-------------|
+| `DATAMALL_ACCOUNT_KEY` | DataMall API key for transport data |
+| `ONEMAP_API_KEY` | OneMap API key for map tiles |
+| `OLLAMA_BASE_URL` | Ollama daemon URL (default: http://host.docker.internal:11434) |
+| `KK_AI_MODEL` | AI model for Kaki agents (default: minimax-m2.5:cloud) |
+
+The app degrades gracefully without API keys — map and basic features still work.
+
+---
+
+## Docker Services
+
+The stack runs four services via `infra/docker-compose.yml`:
+
+| Service | Port | Description |
+|---------|------|-------------|
+| mosquitto | 1883, 9001 | MQTT 5 broker for real-time messaging |
+| redis | 6379 | Durable state mirror |
+| bridge | 8787 | FastAPI + MQTT for identity, presence, live demo |
+| web | 3000 | Vite server with React app, AI agents, gov-data proxies |
+
+---
+
+## Project Layout
+
+```
+CODEEXP/
+├── src/
+│   ├── AppContext.tsx              # Shared truth store + actions
+│   ├── services/
+│   │   └── live.ts                # Real-time NEA fetchers
+│   ├── components/
+│   │   ├── Shell.tsx              # Top-level layout
+│   │   ├── map/
+│   │   │   └── MapCanvas.tsx     # MapLibre + OneMap + drawing
+│   │   ├── layout/
+│   │   │   ├── TopChrome.tsx
+│   │   │   ├── LeftRail.tsx       # Role-aware navigation
+│   │   │   ├── WorkspaceDrawer.tsx
+│   │   │   ├── GlobalActionDock.tsx
+│   │   │   └── BottomStrip.tsx
+│   │   └── workspaces/
+│   │       ├── CitizenWorkspaces.tsx
+│   │       ├── ResponderWorkspaces.tsx
+│   │       └── OpsWorkspaces.tsx
+│   └── primitives/               # Reusable UI components
+├── infra/
+│   └── docker-compose.yml         # Full stack definition
+├── backend/
+│   ├── Dockerfile                 # Bridge container
+│   └── src/                       # FastAPI backend
+├── start.sh                       # One-command Docker setup
+├── start.ps1                      # Windows version
+├── build.sh                       # Node.js build script
+└── run.sh                         # Node.js run script
+```
+
+---
+
+## Managing Docker Containers
+
+### View running containers
 
 ```bash
-./run.sh share
+docker ps
 ```
 
-Runs the preview, then opens a Cloudflare tunnel. After ~10 s a
-`https://*.trycloudflare.com` URL is printed in the terminal — send it
-to anyone, on any network, anywhere.
+### View all containers (including stopped)
 
----
-
-## What you'll see when it opens
-
-- A real Singapore basemap (OneMap grey tiles via MapLibre GL)
-- Top-left chip: `MAP · SG · CITIZEN` (changes with the role selector)
-- Map pins: events at Bedok / AYE / Tampines + live NEA PSI and
-  rainfall overlays refreshed every 60 s
-- Top-right of map (ops only): an 11-tool drawing toolbox
-- Bottom-centre: a tracking pill appears when there's a live SOS or
-  assignment
-
-Switch role from the top-left dropdown (`Citizen / Responder / Ops`).
-Each role gets a different left rail, dock, and workspace set. The
-shared store means a citizen `Report` immediately appears in the ops
-`Reports` queue and the responder `Verify` queue.
-
----
-
-## Project layout
-
-```
-src/
-  AppContext.tsx              shared truth store + actions
-  services/live.ts            real-time fetchers (NEA PSI, rainfall, 2h forecast)
-  components/
-    Shell.tsx                 top-level layout
-    map/MapCanvas.tsx         MapLibre + OneMap basemap + overlays + drawing
-    layout/
-      TopChrome.tsx
-      LeftRail.tsx            role-aware nav, includes responder groups + rooms
-      WorkspaceDrawer.tsx     right-side workspace panel
-      GlobalActionDock.tsx    role-aware bottom action dock
-      BottomStrip.tsx
-      workspaces/
-        CitizenWorkspaces.tsx
-        ResponderWorkspaces.tsx
-        OpsWorkspaces.tsx
-        WorkspaceContent.tsx  registry
-    primitives/
-      SeverityChip.tsx        L1..L5 chips
-      StatusPipeline.tsx      Grab-style steppers
-      TrackingPill.tsx        bottom-centre live process indicator
-      CoveragePreview.tsx     "X cells, Y devices, Z residents" while drawing
-      RolePreviewTabs.tsx     publish gate: citizen / responder / ops tabs
-      SlashComposer.tsx       case room chat input with slash commands
+```bash
+docker ps -a
 ```
 
----
+### Start all containers
+
+```bash
+docker compose -f infra/docker-compose.yml up -d
+```
+
+### Stop all containers
+
+```bash
+docker compose -f infra/docker-compose.yml down
+```
+
+### Restart a specific service
+
+```bash
+docker compose -f infra/docker-compose.yml restart <service-name>
+```
+
+Example:
+```bash
+docker compose -f infra/docker-compose.yml restart bridge
+```
+
+### View logs for all services
+
+```bash
+docker compose -f infra/docker-compose.yml logs -f
+```
+
+### View logs for a specific service
+
+```bash
+docker compose -f infra/docker-compose.yml logs -f <service-name>
+```
+
+Example:
+```bash
+docker compose -f infra/docker-compose.yml logs -f web
+```
+
+### Access container shell (for debugging)
+
+```bash
+docker exec -it <container-name> /bin/sh
+```
+
+Example:
+```bash
+docker exec -it kk-web /bin/sh
+```
+
 
 ## Troubleshooting
 
-**"port already in use"** — `./run.sh` kills 3000/4173/5173 before starting.
-If something exotic is on those ports, run `lsof -ti:5173 | xargs kill -9`.
+### "Port already in use"
 
-**Map shows a grey rectangle but no tiles** — your network is blocking
-`www.onemap.gov.sg`. Confirm with:
-`curl -I https://www.onemap.gov.sg/maps/tiles/Grey/12/3274/2042.png`.
+```bash
+# Find and kill process on port
+lsof -ti:3000 | xargs kill -9
+```
+
+### Map shows grey rectangle but no tiles
+
+Network is blocking `www.onemap.gov.sg`. Verify:
+```bash
+curl -I https://www.onemap.gov.sg/maps/tiles/Grey/12/3274/2042.png
+```
 Should return `HTTP/2 200`.
 
-**NEA chip in top chrome says "fetching…" forever** — your network or
-ad-blocker is blocking `api.data.gov.sg`. Confirm with:
-`curl -sI https://api.data.gov.sg/v1/environment/psi`.
+### NEA data shows "fetching…" forever
 
-**Anyone on the internet** — use `./run.sh share`. Don't use the LAN IP
-for non-LAN users.
+Network or ad-blocker is blocking `api.data.gov.sg`. Verify:
+```bash
+curl -sI https://api.data.gov.sg/v1/environment/psi
+```
 
----
+### Ollama not responding
 
-## Where the original AI Studio template went
+Install Ollama and sign in for AI features:
+```bash
+ollama signin
+```
 
-The template's `GEMINI_API_KEY` and AI Studio metadata are not used in
-Section 2. The Host AI in the case lobby is a deterministic stub today
-(see `AppContext.askHost`). The Gemini wiring is planned for Section 5
-when the backend ships and we run Host inference server-side.
+### View logs
+
+```bash
+# Docker logs
+docker compose -f infra/docker-compose.yml logs -f
+
+# Specific service
+docker compose -f infra/docker-compose.yml logs -f bridge
+```
 
 ---
 
