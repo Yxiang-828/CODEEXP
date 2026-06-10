@@ -349,7 +349,7 @@ export default function MapCanvas() {
         } else if (spec.render === 'heatmap') {
           map.addLayer({ id: `${id}-heat`, type: 'heatmap', source: src, layout: { visibility: vis }, paint: { 'heatmap-color': ['interpolate', ['linear'], ['heatmap-density'], 0, 'rgba(16,185,129,0)', 1, spec.color], 'heatmap-radius': 14, 'heatmap-opacity': 0.7 } });
         } else if (spec.render === 'icon' && spec.icon) {
-          map.addLayer({ id: `${id}-icon`, type: 'symbol', source: src, layout: { visibility: vis, 'icon-image': spec.icon, 'icon-size': 0.6, 'icon-allow-overlap': true } });
+          map.addLayer({ id: `${id}-icon`, type: 'symbol', source: src, layout: { visibility: vis, 'icon-image': spec.icon, 'icon-size': id === 'hospitals' || id === 'aeds' ? 0.78 : 0.6, 'icon-allow-overlap': true } });
         } else {
           map.addLayer({ id: `${id}-pt`, type: 'circle', source: src, layout: { visibility: vis }, paint: { 'circle-radius': spec.radius ?? 6, 'circle-color': spec.color, 'circle-opacity': spec.circleOpacity ?? 0.85, 'circle-stroke-color': '#fff', 'circle-stroke-width': 1 } });
         }

@@ -96,8 +96,15 @@
       "scene": "responder-host",
       "voice": "responder",
       "reference": "2_amateur",
-      "file": "/home/dinosaur/Project/KampungKaki/CODEEXP/public/demo/voice/responder-host.wav",
+      "file": "public/demo/voice/responder-host.wav",
       "durationSeconds": 6.88
+    },
+    {
+      "scene": "responder-host-result",
+      "voice": "responder",
+      "reference": "2_amateur",
+      "file": "public/demo/voice/responder-host-result.wav",
+      "durationSeconds": 8.64
     },
     {
       "scene": "resident-relief",

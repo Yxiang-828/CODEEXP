@@ -17,7 +17,12 @@ import {
   type ReactNode,
 } from 'react';
 import { fetchLiveSnapshot, type LiveSnapshot } from './services/live';
-import { askHostAi } from './services/hostAi';
+import {
+  formatHostAedReply,
+  formatHostHospitalReply,
+  formatHostPsiReply,
+  queryHostTools,
+} from './services/hostTools';
 import { csot, registerDemoQuickJoin } from './services/csot';
 import { useCsotVersion } from './hooks/useCsot';
 import { getDistanceKm, etaMinutes } from './utils/geo';
@@ -159,7 +164,7 @@ interface AppState {
   sendCaseChat: (sosId: string, text: string) => void;
   /** Ask the case-room Host AI ("/host …"); the reply is published into the
    *  private case chat so every member sees the same answer. */
-  askCaseHost: (sosId: string, query: string) => void;
+  askCaseHost: (sosId: string, query: string) => Promise<void>;
   /** Private case-room selectors (only populated for the owner + joined). */
   caseMembers: (sosId: string) => CaseMember[];
   caseChat: (sosId: string) => ChatEntry[];
@@ -1014,18 +1019,204 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     } satisfies ChatEntry);
   };
 
-  // Host AI for the live SOS case room. Context is built from the live SOS
-  // record + private room members (NOT the dormant `operations/case`
-  // collection, which the SOS flow never writes). The reply is published into
-  // the room chat so every member sees the same answer.
-  const askCaseHost: AppState['askCaseHost'] = (sosId, query) => {
+  // Private case-room reads. Only populated for clients subscribed to the room
+  // (the owner + joined responders + ops) — empty for everyone else.
+  const caseMembers: AppState['caseMembers'] = (sosId) =>
+    csot
+      .collectionByPrefix<CaseMember>(`csot/case/${sosId}/member/`)
+      .filter((m) => m && m.id)
+      .sort((a, b) => a.joinedAt - b.joinedAt);
+  const caseChat: AppState['caseChat'] = (sosId) =>
+    csot.collectionByPrefix<ChatEntry>(`csot/case/${sosId}/chat/`).sort((a, b) => a.ts - b.ts);
+  const caseDetails: AppState['caseDetails'] = (sosId) =>
+    csot.collectionByPrefix<SosCaseDetails>(`csot/case/${sosId}/info`)[0];
+
+  type CaseHostResolution =
+    | { type: 'reply'; text: string; chips?: ChatEntry['chips'] }
+    | { type: 'fetch'; tools: Array<'psi' | 'nearestAed' | 'nearestHospital'>; wantsLoadNote?: boolean }
+    | { type: 'unknown'; token: string };
+
+  const HOST_HELP =
+    'Commands: /host status · /host route · /host nearest aed · /host hospital load · /host weather · /host check <member> · /host suggest formation · /host new pings? · /host playback 5m · /host escalate? · /host draft aar · /host help';
+
+  /** Deterministic /host handlers for the live SOS case room — no LLM. */
+  const resolveSosCaseHost = (
+    rawQuery: string,
+    ctx: {
+      sos: DistressSession | undefined;
+      members: CaseMember[];
+      severity: number;
+      caseName: string | null;
+      target: LngLat | undefined;
+      roomChat: ChatEntry[];
+      openUnassigned: DistressSession[];
+    },
+  ): CaseHostResolution | null => {
+    const q = rawQuery.toLowerCase().trim();
+    if (!q.startsWith('/host')) return null;
+
+    if (q.includes('help') || q === '/host') {
+      return { type: 'reply', text: HOST_HELP, chips: [{ label: 'tool: host', ref: 'static' }] };
+    }
+
+    if (q.includes('aed') || (q.includes('nearest') && !q.includes('hospital'))) {
+      return { type: 'fetch', tools: ['nearestAed'] };
+    }
+    if (q.includes('hospital')) {
+      return { type: 'fetch', tools: ['nearestHospital'], wantsLoadNote: q.includes('load') };
+    }
+    if (q.includes('weather') || q.includes('psi')) {
+      return { type: 'fetch', tools: ['psi'] };
+    }
+
+    const { sos, members, severity, caseName, target, roomChat, openUnassigned } = ctx;
+
+    if (q.includes('status') && !q.includes('formation')) {
+      if (!sos) return { type: 'reply', text: 'Case state unavailable.', chips: [{ label: 'tool: case_state', ref: 'unavailable' }] };
+      const onScene = members.filter((m) => m.status === 'arrived').length;
+      const enRoute = members.filter((m) => m.status === 'en_route').length;
+      const info = caseDetails(sos.id);
+      const lines = [
+        caseName ?? sos.id,
+        `Status: ${sos.status} · Severity ${severity} · ${sos.category}`,
+        target ? `Location: ${target.lat.toFixed(4)}, ${target.lng.toFixed(4)}` : 'Location: unavailable',
+        sos.details ? `Details: ${sos.details}` : null,
+        info?.phone ? `Contact: ${info.phone}` : null,
+        `Members (${members.length}): ${members.length ? members.map((m) => `${m.name} · ${m.status}`).join(' · ') : 'none yet'}`,
+        `On scene: ${onScene} · En route: ${enRoute}`,
+      ];
+      if (info?.aidCard) {
+        const a = info.aidCard;
+        const cond = a.conditions?.length ? a.conditions.join(', ') : 'none listed';
+        const carry = a.carries?.length ? a.carries.join(', ') : 'none listed';
+        lines.push(`Aid card: ${cond} · carries ${carry}${a.allergies ? ` · allergies ${a.allergies}` : ''}`);
+      }
+      return {
+        type: 'reply',
+        text: lines.filter(Boolean).join('\n'),
+        chips: [{ label: 'tool: case_state', ref: sos.status }, { label: 'tool: roster', ref: `${members.length}` }],
+      };
+    }
+
+    if (q.includes('route')) {
+      if (!target) return { type: 'reply', text: 'Route unavailable: no case location.', chips: [{ label: 'tool: route', ref: 'unavailable' }] };
+      const header = `Routes to ${caseName ?? 'case'} (${target.lat.toFixed(4)}, ${target.lng.toFixed(4)}):`;
+      const lines = members
+        .filter((m) => Number.isFinite(m.location.lat))
+        .map((m) => {
+          const km = getDistanceKm(m.location, target);
+          return `${m.name}: ${km.toFixed(2)} km · ETA ${etaMinutes(km)} min · from ${m.location.lat.toFixed(4)}, ${m.location.lng.toFixed(4)}`;
+        });
+      return {
+        type: 'reply',
+        text: lines.length ? `${header}\n${lines.join('\n')}` : `${header}\nNo members in this case room yet.`,
+        chips: [{ label: 'tool: route', ref: 'haversine' }],
+      };
+    }
+
+    if (q.includes('check')) {
+      const tokens = q.replace('/host', '').replace('check', '').trim().split(/\s+/).filter(Boolean);
+      const found = members.find((m) => tokens.some((t) => m.name.toLowerCase().includes(t) || m.id.toLowerCase().includes(t)));
+      if (!found) return { type: 'reply', text: 'Check: member not found in this case roster.', chips: [{ label: 'tool: roster', ref: 'no_match' }] };
+      const skills = found.proficiencies?.length ? found.proficiencies.join(', ') : 'none';
+      return {
+        type: 'reply',
+        text: `${found.name} · ${found.role} · ${found.status} · loc ${found.location.lat.toFixed(4)},${found.location.lng.toFixed(4)} · skills: ${skills}.`,
+        chips: [{ label: 'tool: roster', ref: found.status }],
+      };
+    }
+
+    if (q.includes('formation') || q.includes('suggest')) {
+      if (!sos) return { type: 'reply', text: 'Formation suggestion unavailable: no active case.', chips: [{ label: 'tool: formation', ref: 'unavailable' }] };
+      const skillCounts: Record<string, number> = {};
+      members.forEach((m) => {
+        (m.proficiencies ?? []).forEach((p) => { skillCounts[p] = (skillCounts[p] ?? 0) + 1; });
+      });
+      const roster = Object.entries(skillCounts).map(([k, v]) => `${k}:${v}`).join(' · ') || 'empty';
+      const need: string[] = [];
+      if (sos.category === 'fire' && !skillCounts.fire) need.push('fire');
+      if (sos.category === 'medical' && !skillCounts.medical) need.push('medical');
+      if (!skillCounts.medical && severity >= 3) need.push('medical');
+      return {
+        type: 'reply',
+        text: `Roster: ${roster}. ${need.length ? `Suggest add: ${need.join(', ')}.` : 'Composition acceptable for current case kind.'}`,
+        chips: [{ label: 'tool: formation', ref: need.length ? 'gap' : 'ok' }],
+      };
+    }
+
+    if (q.includes('ping') || q.includes('new')) {
+      if (!target || openUnassigned.length === 0) {
+        return {
+          type: 'reply',
+          text: openUnassigned.length === 0 ? 'No unassigned SOS pings.' : 'No active case location to compare against.',
+          chips: [{ label: 'tool: sos_queue', ref: `${openUnassigned.length}` }],
+        };
+      }
+      const sorted = openUnassigned
+        .map((s) => ({ s, km: getDistanceKm(s.location, target) }))
+        .sort((a, b) => a.km - b.km)
+        .slice(0, 3);
+      const lines = sorted.map(({ s, km }) => `${s.id} · ${s.category} · ${km.toFixed(1)} km from case`);
+      return {
+        type: 'reply',
+        text: `Open pings near ${caseName ?? 'case'}:\n${lines.join('\n')}`,
+        chips: [{ label: 'tool: sos_queue', ref: `${openUnassigned.length}` }],
+      };
+    }
+
+    if (q.includes('playback')) {
+      const cutoff = Date.now() - 5 * 60_000;
+      const recent = roomChat.filter((c) => c.ts >= cutoff);
+      if (recent.length === 0) return { type: 'reply', text: 'No chat activity in last 5 min.', chips: [{ label: 'tool: chat_log', ref: '0' }] };
+      const lines = recent.slice(-6).map((c) => {
+        const author = c.authorId === 'host' ? 'Host' : (c.authorName ?? c.authorId);
+        return `${author}: ${c.text.slice(0, 80)}`;
+      });
+      return {
+        type: 'reply',
+        text: `Last 5 min (${recent.length} entries):\n${lines.join('\n')}`,
+        chips: [{ label: 'tool: chat_log', ref: `${recent.length}` }],
+      };
+    }
+
+    if (q.includes('escalate')) {
+      if (!sos) return { type: 'reply', text: 'Escalation assessment unavailable: no active case found.', chips: [{ label: 'tool: case_state', ref: 'unavailable' }] };
+      const openCount = sosSessions.filter((s) => !['resolved', 'cancelled'].includes(s.status)).length;
+      const decision = severity >= 4 || openCount >= 3 ? 'YES' : 'NO';
+      const why = severity >= 4 ? `severity ${severity} ≥ 4` : openCount >= 3 ? `${openCount} open SOS pings` : `severity ${severity} below threshold; ${openCount} open pings`;
+      return { type: 'reply', text: `${decision}. Rationale: ${why}.`, chips: [{ label: 'tool: case_state', ref: sos.status }] };
+    }
+
+    if (q.includes('aar')) {
+      if (!sos) return { type: 'reply', text: 'AAR draft unavailable: no case selected.', chips: [{ label: 'tool: aar', ref: 'unavailable' }] };
+      const durationMin = Math.round((Date.now() - sos.startedAt) / 60_000);
+      return {
+        type: 'reply',
+        text: [
+          `AAR draft · ${caseName ?? sos.id}`,
+          `Category: ${sos.category}${sos.details ? ` · ${sos.details}` : ''}`,
+          `Severity: ${severity} · Status: ${sos.status} · Duration: ${durationMin} min`,
+          `Members (${members.length}): ${members.map((m) => m.name).join(', ') || 'none'}`,
+          `Chat entries: ${roomChat.length}. Outcomes / lessons: pending captain input.`,
+        ].join('\n'),
+        chips: [{ label: 'tool: aar', ref: 'draft' }],
+      };
+    }
+
+    const token = rawQuery.replace(/^\/host\s*/i, '').trim().split(/\s+/)[0] || '(empty)';
+    return { type: 'unknown', token };
+  };
+
+  // Host slash commands for the live SOS case room — structured lookups only
+  // (case state, routes, OneMap, NEA). Bekal/Pelita handle conversational AI.
+  const askCaseHost: AppState['askCaseHost'] = async (sosId, query) => {
     const publishHostReply = (text: string, chips?: ChatEntry['chips']) => {
       const mid = newId('MSG');
       csot.publishTopic(`csot/case/${sosId}/chat/${mid}`, {
         id: mid,
         caseId: sosId,
         authorId: 'host',
-        authorName: 'Host AI',
+        authorName: 'Host',
         kind: 'host',
         text,
         chips,
@@ -1036,49 +1227,69 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     const sos = sosSessions.find((s) => s.id === sosId);
     const members = caseMembers(sosId);
     const severityFor: Record<SosCategory, number> = { medical: 4, fire: 4, trapped: 4, threat: 3, hazard: 3, other: 2 };
-    const recentChat = caseChat(sosId)
-      .slice(-8)
-      .map((c) => ({ author: c.authorName ?? c.authorId, kind: c.kind, text: c.text.slice(0, 140), ts: c.ts }));
-    const openSos = sosSessions
-      .filter((s) => !['resolved', 'cancelled'].includes(s.status) && (s.memberCount ?? 0) === 0)
-      .map((s) => ({ id: s.id, category: s.category, status: s.status, location: s.location }));
-    askHostAi({
-      role,
-      workspace: 'case_lobby',
-      prompt: query,
-      context: {
-        case: sos
-          ? {
-              id: sos.id,
-              name: `${sos.category} SOS · ${sos.citizenName}`,
-              state: sos.status,
-              severity: severityFor[sos.category] ?? 3,
-              centroid: sos.location,
-              details: sos.details ?? null,
-            }
-          : null,
-        responders: members.map((m) => ({
-          id: m.id,
-          name: m.name,
-          status: m.status === 'arrived' ? 'on_scene' : 'en_route',
-          role: m.role,
-          location: m.location,
-        })),
-        sos: openSos,
-        chatRecent: recentChat,
-        liveSnapshot: liveSnapshot ? { psi: liveSnapshot.psi?.[0] ?? null } : null,
-        selfLocation,
-        selfResponderId,
-      },
-    })
-      .then((reply) => {
-        // The server returns honest text for every state (live answer or
-        // tool-backed fallback) — never discard it.
-        publishHostReply(reply.text || 'Host AI returned an empty reply. Try /host help.', reply.chips);
-      })
-      .catch(() => {
-        publishHostReply('Host AI unreachable: network error. Try again in a moment.');
-      });
+    const severity = sos ? severityFor[sos.category] ?? 3 : 0;
+    const caseName = sos ? `${sos.category} SOS · ${sos.citizenName}` : null;
+    const target = sos?.location;
+    const roomChat = caseChat(sosId);
+    const openUnassigned = sosSessions.filter((s) => !['resolved', 'cancelled'].includes(s.status) && (s.memberCount ?? 0) === 0);
+
+    const resolution = resolveSosCaseHost(query, {
+      sos,
+      members,
+      severity,
+      caseName,
+      target,
+      roomChat,
+      openUnassigned,
+    });
+
+    if (!resolution) return;
+
+    if (resolution.type === 'reply') {
+      publishHostReply(resolution.text, resolution.chips);
+      return;
+    }
+
+    if (resolution.type === 'unknown') {
+      publishHostReply(
+        `Unrecognized command: ${resolution.token}. Type /host help for available commands.`,
+        [{ label: 'tool: host', ref: 'static' }],
+      );
+      return;
+    }
+
+    const pendingId = newId('MSG');
+    const pendingTopic = `csot/case/${sosId}/chat/${pendingId}`;
+    csot.publishTopic(pendingTopic, {
+      id: pendingId,
+      caseId: sosId,
+      authorId: 'host',
+      authorName: 'Host',
+      kind: 'host',
+      text: 'Host is checking…',
+      ts: Date.now(),
+    } satisfies ChatEntry);
+
+    const origin = target;
+    if (!origin || !Number.isFinite(origin.lat) || !Number.isFinite(origin.lng)) {
+      csot.removeTopic(pendingTopic);
+      publishHostReply('Lookup unavailable: no case location to measure from.');
+      return;
+    }
+    try {
+      const result = await queryHostTools(resolution.tools, origin);
+      csot.removeTopic(pendingTopic);
+      const formatted =
+        resolution.tools.includes('nearestAed')
+          ? formatHostAedReply(result, origin)
+          : resolution.tools.includes('nearestHospital')
+            ? formatHostHospitalReply(result, !!resolution.wantsLoadNote, origin)
+            : formatHostPsiReply(result);
+      publishHostReply(formatted.text, formatted.chips);
+    } catch {
+      csot.removeTopic(pendingTopic);
+      publishHostReply('Host lookup failed. Try again in a moment.');
+    }
   };
 
   function teardownCaseRoom(sosId: string) {
@@ -1139,18 +1350,6 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       visibleTo: ['ops', 'responder', 'citizen'],
     });
   };
-
-  // Private case-room reads. Only populated for clients subscribed to the room
-  // (the owner + joined responders + ops) — empty for everyone else.
-  const caseMembers: AppState['caseMembers'] = (sosId) =>
-    csot
-      .collectionByPrefix<CaseMember>(`csot/case/${sosId}/member/`)
-      .filter((m) => m && m.id)
-      .sort((a, b) => a.joinedAt - b.joinedAt);
-  const caseChat: AppState['caseChat'] = (sosId) =>
-    csot.collectionByPrefix<ChatEntry>(`csot/case/${sosId}/chat/`).sort((a, b) => a.ts - b.ts);
-  const caseDetails: AppState['caseDetails'] = (sosId) =>
-    csot.collectionByPrefix<SosCaseDetails>(`csot/case/${sosId}/info`)[0];
 
   const updateSelfProfile: AppState['updateSelfProfile'] = (patch) => {
     const id = csot.identity?.userId;
@@ -1318,43 +1517,38 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
 
   const askHost: AppState['askHost'] = (caseId, query) => {
     const id = newId('CH');
+    const q = query.toLowerCase();
     const caseRoom = cases.find((c) => c.id === caseId);
-    const caseEvent = events.find((e) => e.caseId === caseId);
-    const caseMembers = responders.filter((r) => caseRoom?.members.includes(r.id));
-    const recentCutoff = Date.now() - 5 * 60_000;
-    const recentChat = chat
-      .filter((c) => c.caseId === caseId && c.ts >= recentCutoff)
-      .slice(-8)
-      .map((c) => ({ author: c.authorId, kind: c.kind, text: c.text.slice(0, 140), ts: c.ts }));
-    const openSos = sosSessions
-      .filter((s) => !['resolved', 'cancelled'].includes(s.status) && (s.memberCount ?? 0) === 0)
-      .map((s) => ({ id: s.id, category: s.category, status: s.status, location: s.location }));
-    askHostAi({
-      role,
-      workspace: 'case_lobby',
-      prompt: query,
-      context: {
-        case: caseRoom,
-        event: caseEvent,
-        responders: caseMembers.map((r) => ({ id: r.id, name: r.name, status: r.status, role: r.role, location: r.location, org: r.org })),
-        sos: openSos,
-        chatRecent: recentChat,
-        liveSnapshot: liveSnapshot ? { psi: liveSnapshot.psi?.[0] ?? null } : null,
-        selfResponderId,
-      },
-    })
-      .then((reply) => {
-        // Server text is honest for every state (live answer or tool-backed
-        // fallback) — only fall back locally when there is no text at all.
-        const entry = reply.text
-          ? { text: reply.text, chips: reply.chips }
-          : fallbackHost(query, caseId);
-        putChat({ id, caseId, authorId: 'host', kind: 'host', ...entry, ts: Date.now() });
-      })
-      .catch(() => {
-        const fallback = fallbackHost(query, caseId);
-        putChat({ id, caseId, authorId: 'host', kind: 'host', text: fallback.text, chips: fallback.chips, ts: Date.now() });
-      });
+    const origin = caseRoom?.centroid ?? selfLocation;
+
+    const publish = (text: string, chips?: ChatEntry['chips']) => {
+      putChat({ id, caseId, authorId: 'host', kind: 'host', text, chips, ts: Date.now() });
+    };
+
+    const run = async () => {
+      if (q.includes('aed') || (q.includes('nearest') && !q.includes('hospital'))) {
+        const formatted = formatHostAedReply(await queryHostTools(['nearestAed'], origin));
+        publish(formatted.text, formatted.chips);
+        return;
+      }
+      if (q.includes('hospital')) {
+        const formatted = formatHostHospitalReply(await queryHostTools(['nearestHospital'], origin), q.includes('load'));
+        publish(formatted.text, formatted.chips);
+        return;
+      }
+      if (q.includes('weather') || q.includes('psi')) {
+        const formatted = formatHostPsiReply(await queryHostTools(['psi'], origin));
+        publish(formatted.text, formatted.chips);
+        return;
+      }
+      const fallback = fallbackHost(query, caseId);
+      publish(fallback.text, fallback.chips);
+    };
+
+    void run().catch(() => {
+      const fallback = fallbackHost(query, caseId);
+      publish(fallback.text, fallback.chips);
+    });
   };
 
   const updateResponderLocation: AppState['updateResponderLocation'] = (responderId, loc) => {

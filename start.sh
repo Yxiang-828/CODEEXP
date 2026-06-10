@@ -40,7 +40,11 @@ else
   warn "Everything else (map, SOS, the live demo) still runs. Continuing…"
 fi
 
-# 4 — one build + run.
+# 4 — clean slate: tear down any previous run so fixed container names / ports
+# never clash, then one build + run.
+say "stopping any previous stack…"
+docker compose -f infra/docker-compose.yml down --remove-orphans >/dev/null 2>&1 || true
+
 say "building + starting the whole stack (first run pulls images / installs deps — a few minutes)…"
 if [ "$1" = "-d" ]; then
   docker compose -f infra/docker-compose.yml up -d --build

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Send } from 'lucide-react';
+import { Send, Sparkles } from 'lucide-react';
 import { useAppContext, type Role } from '../AppContext';
 
 const ROLE_LABEL: Record<Role, string> = { citizen: 'Citizen', responder: 'Responder', ops: 'Ops' };
@@ -9,34 +9,41 @@ const ROLE_LABEL: Record<Role, string> = { citizen: 'Citizen', responder: 'Respo
 export default function CaseChat({ sosId }: { sosId: string }) {
   const { caseChat, sendCaseChat, askCaseHost, selfResponderId } = useAppContext();
   const [draft, setDraft] = useState('');
+  const [hostBusy, setHostBusy] = useState(false);
   const messages = caseChat(sosId);
 
-  const send = () => {
+  const send = async () => {
     const t = draft.trim();
-    if (!t) return;
-    // "/host …" goes into the room like any message (everyone sees the
-    // question), then the Host AI's answer is published back to the room.
+    if (!t || hostBusy) return;
     sendCaseChat(sosId, t);
-    if (t.toLowerCase().startsWith('/host')) askCaseHost(sosId, t);
     setDraft('');
+    if (!t.toLowerCase().startsWith('/host')) return;
+    setHostBusy(true);
+    try {
+      await askCaseHost(sosId, t);
+    } finally {
+      setHostBusy(false);
+    }
   };
 
   return (
     <div>
       <div className="text-[11px] uppercase font-bold tracking-widest text-text-secondary mb-1.5">Chat</div>
       <div className="rounded-xl border border-border-soft bg-surface-1 p-2 space-y-1.5 max-h-48 overflow-y-auto">
-        {messages.length === 0 && (
+        {messages.length === 0 && !hostBusy && (
           <p className="text-xs text-text-secondary px-1 py-2 text-center">Coordinate here — only people on this case can see it.</p>
         )}
         {messages.map((m) => {
           if (m.kind === 'host' || m.authorId === 'host') {
+            const checking = m.text === 'Host is checking…';
             return (
               <div key={m.id} className="flex flex-col items-start">
-                <span className="text-[10px] font-semibold text-accent-info px-1">Host AI</span>
-                <span className="max-w-[92%] rounded-2xl px-3 py-1.5 text-sm bg-surface-0 border border-accent-info text-text-primary whitespace-pre-line">
+                <span className="text-[10px] font-semibold text-accent-info px-1">Host</span>
+                <span className={`max-w-[92%] rounded-2xl px-3 py-1.5 text-sm bg-surface-0 border border-accent-info text-text-primary whitespace-pre-line ${checking ? 'italic text-text-secondary' : ''}`}>
+                  {checking && <Sparkles className="inline w-3.5 h-3.5 mr-1.5 animate-pulse align-[-2px]" />}
                   {m.text}
                 </span>
-                {m.chips && m.chips.length > 0 && (
+                {!checking && m.chips && m.chips.length > 0 && (
                   <span className="flex flex-wrap gap-1 px-1 pt-0.5">
                     {m.chips.map((c) => (
                       <span key={`${m.id}-${c.label}`} className="text-[9px] rounded-full border border-border-soft px-1.5 py-px text-text-secondary">
@@ -67,11 +74,12 @@ export default function CaseChat({ sosId }: { sosId: string }) {
         <input
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter') send(); }}
+          onKeyDown={(e) => { if (e.key === 'Enter') void send(); }}
           placeholder="Message the case… (/host help)"
-          className="flex-1 h-10 px-3 rounded-lg border border-border-soft bg-surface-0 text-sm text-text-primary outline-none focus:border-text-primary"
+          disabled={hostBusy}
+          className="flex-1 h-10 px-3 rounded-lg border border-border-soft bg-surface-0 text-sm text-text-primary outline-none focus:border-text-primary disabled:opacity-60"
         />
-        <button onClick={send} disabled={!draft.trim()} className="w-10 h-10 rounded-lg bg-surface-3 text-text-inverse flex items-center justify-center disabled:opacity-40">
+        <button onClick={() => void send()} disabled={!draft.trim() || hostBusy} className="w-10 h-10 rounded-lg bg-surface-3 text-text-inverse flex items-center justify-center disabled:opacity-40">
           <Send className="w-4 h-4" />
         </button>
       </div>

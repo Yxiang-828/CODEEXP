@@ -21,8 +21,12 @@ function Die  ($m) { Write-Host "xx $m" -ForegroundColor Red; exit 1 }
 
 if ($Cmd -eq "down") {
   Say "stopping KampungKaki..."
+  $prevErr = $ErrorActionPreference
+  $ErrorActionPreference = 'Continue'
   docker compose -f infra/docker-compose.yml down
-  exit $LASTEXITCODE
+  $code = $LASTEXITCODE
+  $ErrorActionPreference = $prevErr
+  exit $code
 }
 
 # 1 - Docker must be installed and running.
@@ -51,7 +55,13 @@ try {
   Warn "Everything else (map, SOS, the live demo) still runs. Continuing..."
 }
 
-# 4 - one build + run.
+# 4 - clean slate: tear down any previous run so fixed names / ports never clash.
+Say "stopping any previous stack..."
+$prevErr = $ErrorActionPreference
+$ErrorActionPreference = 'Continue'
+docker compose -f infra/docker-compose.yml down --remove-orphans 2>$null | Out-Null
+$ErrorActionPreference = $prevErr
+
 Say "building + starting the whole stack (first run pulls images / installs deps - a few minutes)..."
 if ($Detach -or $Cmd -eq "-Detach" -or $Cmd -eq "-d") {
   docker compose -f infra/docker-compose.yml up -d --build

@@ -20,7 +20,7 @@ export default async function handler(req, res) {
     return;
   }
 
-  const body = await readJson(req);
+  const body = req.body && typeof req.body === 'object' ? req.body : await readJson(req);
   const prompt = String(body?.prompt ?? '').slice(0, MAX_PROMPT_CHARS).trim();
   const role = String(body?.role ?? 'unknown');
   const workspace = String(body?.workspace ?? 'unknown');
@@ -40,6 +40,18 @@ export default async function handler(req, res) {
 
   const enrichedContext = { ...clientContext, tools };
   const serialised = JSON.stringify(enrichedContext).slice(0, MAX_CONTEXT_CHARS);
+
+  if (body.toolsOnly) {
+    res.statusCode = 200;
+    res.end(
+      JSON.stringify({
+        state: 'live',
+        text: fallbackText(role, workspace, prompt, tools, enrichedContext),
+        chips: [{ label: 'tool: host_ai', ref: 'tools' }, ...toolChips(tools)],
+      }),
+    );
+    return;
+  }
 
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) {
@@ -76,8 +88,11 @@ export default async function handler(req, res) {
           { role: 'user', content: `context=${serialised}\n\nrequest=${prompt}` },
         ],
         temperature: 0.2,
-        max_tokens: 900,
+        // Prompts cap replies at ≤8 short lines; a big budget only invites
+        // slow models to ramble into the timeout.
+        max_tokens: 400,
       }),
+      signal: AbortSignal.timeout(30_000),
     });
 
     if (!upstream.ok) {
@@ -230,12 +245,12 @@ function fallbackText(role, workspace, prompt, tools, ctx) {
     }
     if (q.includes('aed')) {
       return nearestAed
-        ? `Nearest AED: ${nearestAed.name} · ${nearestAed.distanceKm} km.`
-        : 'Nearest AED: unavailable (OneMap not configured server-side).';
+        ? `Nearest AED (map layer): ${nearestAed.name} · ${nearestAed.distanceKm} km.`
+        : 'Nearest AED: unavailable.';
     }
     if (q.includes('hospital')) {
       return nearestHospital
-        ? `Nearest A&E: ${nearestHospital.name} · ${nearestHospital.distanceKm} km.`
+        ? `Nearest A&E (map layer): ${nearestHospital.name} · ${nearestHospital.distanceKm} km.`
         : 'Hospital load: unavailable. No live MOH/hospital load source.';
     }
     if (q.includes('weather') || q.includes('psi')) {
@@ -249,7 +264,19 @@ function fallbackText(role, workspace, prompt, tools, ctx) {
       const yes = sev >= 4 || openSos >= 3;
       return `${yes ? 'YES' : 'NO'}. Severity ${sev} · ${openSos} open SOS pings.`;
     }
-    return 'Try: /host status · /host nearest aed · /host hospital load · /host weather · /host escalate? · /host help.';
+    if (q.includes('route') && caseRoom?.centroid) {
+      const lines = responders
+        .filter((r) => r.location && Number.isFinite(r.location.lat))
+        .map((r) => {
+          const km = haversineKm(r.location, caseRoom.centroid);
+          const etaMin = Math.max(1, Math.round((km / 24) * 60));
+          return `${r.name}: ${km.toFixed(2)} km · ETA ~${etaMin} min to case.`;
+        });
+      return lines.length
+        ? `Routes to ${caseRoom.name}:\n${lines.join('\n')}`
+        : 'No members in this case room yet.';
+    }
+    return 'Try: /host status · /host route · /host nearest aed · /host hospital load · /host weather · /host escalate? · /host help.';
   }
 
   if (workspace === 'responder_mission') {

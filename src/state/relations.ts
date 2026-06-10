@@ -36,7 +36,7 @@
 //   getLivePsi()                — NEA 24-hour PSI by region
 //   getLiveRainfall(near?)      — NEA rainfall, optionally bounded by lng/lat km
 //   getNearestAed(lng,lat)      — OneMap aed_locations theme
-//   getNearestHospital(lng,lat) — OneMap moh_hospitals theme
+//   getNearestHospital(lng,lat) — bundled sg-hospitals.geojson (same as map layer)
 //   getActiveSos()              — SOS that have not resolved/cancelled
 //   getCaseRoster(caseId)       — case members + statuses
 //   getResponderRoster()        — active responders summary

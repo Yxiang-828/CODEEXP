@@ -114,10 +114,16 @@
       "narration": "Before I join, I see the category and location but not private medical details. Once I commit, the case room opens and the aid card becomes useful."
     },
     {
+      "id": "responder-aidcard",
+      "voice": "responder",
+      "speaker": "Responder, Aisha",
+      "narration": "There — Mei Ling's aid card: asthma, inhaler, no drug allergies. That only appeared because I joined the private case room."
+    },
+    {
       "id": "responder-host",
       "voice": "responder",
       "speaker": "Responder, Aisha",
-      "narration": "The case room has a Host A I on tap. I send slash host status, and the same answer lands for every member of the room."
+      "narration": "Every case room has Host — slash commands, not another chat bot. I type slash host status; the whole room gets the same structured readout from live case data."
     },
     {
       "id": "resident-relief",
