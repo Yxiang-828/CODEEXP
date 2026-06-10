@@ -157,6 +157,9 @@ interface AppState {
   markArrived: (sosId: string) => void;
   /** Group chat for a case — owner + joined responders only. */
   sendCaseChat: (sosId: string, text: string) => void;
+  /** Ask the case-room Host AI ("/host …"); the reply is published into the
+   *  private case chat so every member sees the same answer. */
+  askCaseHost: (sosId: string, query: string) => void;
   /** Private case-room selectors (only populated for the owner + joined). */
   caseMembers: (sosId: string) => CaseMember[];
   caseChat: (sosId: string) => ChatEntry[];
@@ -1011,6 +1014,73 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     } satisfies ChatEntry);
   };
 
+  // Host AI for the live SOS case room. Context is built from the live SOS
+  // record + private room members (NOT the dormant `operations/case`
+  // collection, which the SOS flow never writes). The reply is published into
+  // the room chat so every member sees the same answer.
+  const askCaseHost: AppState['askCaseHost'] = (sosId, query) => {
+    const publishHostReply = (text: string, chips?: ChatEntry['chips']) => {
+      const mid = newId('MSG');
+      csot.publishTopic(`csot/case/${sosId}/chat/${mid}`, {
+        id: mid,
+        caseId: sosId,
+        authorId: 'host',
+        authorName: 'Host AI',
+        kind: 'host',
+        text,
+        chips,
+        ts: Date.now(),
+      } satisfies ChatEntry);
+    };
+
+    const sos = sosSessions.find((s) => s.id === sosId);
+    const members = caseMembers(sosId);
+    const severityFor: Record<SosCategory, number> = { medical: 4, fire: 4, trapped: 4, threat: 3, hazard: 3, other: 2 };
+    const recentChat = caseChat(sosId)
+      .slice(-8)
+      .map((c) => ({ author: c.authorName ?? c.authorId, kind: c.kind, text: c.text.slice(0, 140), ts: c.ts }));
+    const openSos = sosSessions
+      .filter((s) => !['resolved', 'cancelled'].includes(s.status) && (s.memberCount ?? 0) === 0)
+      .map((s) => ({ id: s.id, category: s.category, status: s.status, location: s.location }));
+    askHostAi({
+      role,
+      workspace: 'case_lobby',
+      prompt: query,
+      context: {
+        case: sos
+          ? {
+              id: sos.id,
+              name: `${sos.category} SOS · ${sos.citizenName}`,
+              state: sos.status,
+              severity: severityFor[sos.category] ?? 3,
+              centroid: sos.location,
+              details: sos.details ?? null,
+            }
+          : null,
+        responders: members.map((m) => ({
+          id: m.id,
+          name: m.name,
+          status: m.status === 'arrived' ? 'on_scene' : 'en_route',
+          role: m.role,
+          location: m.location,
+        })),
+        sos: openSos,
+        chatRecent: recentChat,
+        liveSnapshot: liveSnapshot ? { psi: liveSnapshot.psi?.[0] ?? null } : null,
+        selfLocation,
+        selfResponderId,
+      },
+    })
+      .then((reply) => {
+        // The server returns honest text for every state (live answer or
+        // tool-backed fallback) — never discard it.
+        publishHostReply(reply.text || 'Host AI returned an empty reply. Try /host help.', reply.chips);
+      })
+      .catch(() => {
+        publishHostReply('Host AI unreachable: network error. Try again in a moment.');
+      });
+  };
+
   function teardownCaseRoom(sosId: string) {
     for (const m of csot.collectionByPrefix<CaseMember>(`csot/case/${sosId}/member/`)) {
       csot.removeTopic(`csot/case/${sosId}/member/${m.id}`);
@@ -1274,7 +1344,9 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       },
     })
       .then((reply) => {
-        const entry = reply.state === 'live'
+        // Server text is honest for every state (live answer or tool-backed
+        // fallback) — only fall back locally when there is no text at all.
+        const entry = reply.text
           ? { text: reply.text, chips: reply.chips }
           : fallbackHost(query, caseId);
         putChat({ id, caseId, authorId: 'host', kind: 'host', ...entry, ts: Date.now() });
@@ -1354,6 +1426,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     leaveSosCase,
     markArrived,
     sendCaseChat,
+    askCaseHost,
     caseMembers,
     caseChat,
     caseDetails,

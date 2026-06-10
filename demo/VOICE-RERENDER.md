@@ -5,6 +5,10 @@ The narration for **10 scenes** in `demo/incident-281.json` was rewritten
 still speak the **old** text. Captions show the new text, so audio and
 captions contradict each other until these are re-rendered.
 
+On top of those, **1 brand-new scene** (`responder-host`, the case-room
+Host AI beat) has **no WAV at all** — the live demo falls back to browser
+TTS / captions for it until rendered.
+
 Quick-showcase voices (`public/demo/voice/quick/`) are **fine** — the quick
 narration was not changed. The other 38 live-demo WAVs are also fine.
 
@@ -33,6 +37,9 @@ node scripts/ai-demo-voice.mjs --render --force --scene=resident-safe
 node scripts/ai-demo-voice.mjs --render --force --scene=map-ops-camera
 node scripts/ai-demo-voice.mjs --render --force --scene=pondok-result
 node scripts/ai-demo-voice.mjs --render --force --scene=ops-broadcast-action
+
+# brand-new scene (no WAV exists yet)
+node scripts/ai-demo-voice.mjs --render --scene=responder-host
 ```
 
 Then commit the updated `public/demo/voice/*.wav` (and the manifest if the
@@ -52,6 +59,7 @@ script rewrites it) and push.
 | `public/demo/voice/map-ops-camera.wav` | director | AI Director | Nadia opens the nearest traffic camera to Exit B as potential access evidence, then judges whether its view is useful. |
 | `public/demo/voice/pondok-result.wav` | director | AI Director | Pondok has compared the live roster with the case and highlighted skill-fit candidates for medical and A E D support. Nadia still decides every deployment. |
 | `public/demo/voice/ops-broadcast-action.wav` | director | AI Director | Nadia sends the warning to citizens and responders, labels the area Exit B, marks it Emergency, and gives one clear public action: keep the walkway and access road clear. |
+| `public/demo/voice/responder-host.wav` (NEW) | responder | Responder, Aisha | The case room has a Host A I on tap. I send slash host status, and the same answer lands for every member of the room. |
 
 The script reads the narration straight from `demo/incident-281.json`, so the
 table above is just for verification — no manual text entry needed.

@@ -1119,6 +1119,27 @@ export default function LiveDirector({ autostart, onExit }: { autostart: boolean
       const sendChat = chatInput.parentElement?.querySelector('button') as HTMLButtonElement | null;
       if (sendChat) await click('responder', () => sendChat, 'send case chat');
 
+      await narrate(
+        'responder-host',
+        'Aisha',
+        'The case room has a Host A I on tap. I send slash host status, and the same answer lands for every member of the room.',
+      );
+      await fill('responder', () => inputByPlaceholder('responder', 'Message the case'), '/host status', 'host command');
+      const hostCmdInput = await waitFor(() => inputByPlaceholder('responder', 'Message the case'), 'case chat input');
+      const sendHostCmd = hostCmdInput.parentElement?.querySelector('button') as HTMLButtonElement | null;
+      if (sendHostCmd) await click('responder', () => sendHostCmd, 'send host command');
+      await waitFor(
+        () => Array.from(frameDocument('responder').querySelectorAll('span'))
+          .some((element) => element.textContent === 'Host AI') ? document.body : null,
+        'host reply in case chat',
+        30000,
+      );
+      await flashEvidenceCard(
+        'HOST AI · CASE ROOM',
+        'ONE ANSWER FOR THE WHOLE ROOM',
+        'The Host reads the live case state, members, and severity plus server tools, and answers inside the private room over MQTT.',
+      );
+
       await switchCamera('resident', 'Citizen · help becomes visible');
       await waitFor(
         () => (frameWindow('resident').__kkMapDemo?.responderMarkerCount() ?? 0) >= renderedSwarmMarkers

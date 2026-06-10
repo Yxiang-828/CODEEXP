@@ -114,6 +114,12 @@
       "narration": "Before I join, I see the category and location but not private medical details. Once I commit, the case room opens and the aid card becomes useful."
     },
     {
+      "id": "responder-host",
+      "voice": "responder",
+      "speaker": "Responder, Aisha",
+      "narration": "The case room has a Host A I on tap. I send slash host status, and the same answer lands for every member of the room."
+    },
+    {
       "id": "resident-relief",
       "voice": "resident",
       "speaker": "Citizen, Mei Ling",

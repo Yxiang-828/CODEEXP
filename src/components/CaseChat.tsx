@@ -7,14 +7,17 @@ const ROLE_LABEL: Record<Role, string> = { citizen: 'Citizen', responder: 'Respo
 // Group chat for an SOS case — shared by the owner + joined responders only
 // (the messages live in the private case room; non-members never receive them).
 export default function CaseChat({ sosId }: { sosId: string }) {
-  const { caseChat, sendCaseChat, selfResponderId } = useAppContext();
+  const { caseChat, sendCaseChat, askCaseHost, selfResponderId } = useAppContext();
   const [draft, setDraft] = useState('');
   const messages = caseChat(sosId);
 
   const send = () => {
     const t = draft.trim();
     if (!t) return;
+    // "/host …" goes into the room like any message (everyone sees the
+    // question), then the Host AI's answer is published back to the room.
     sendCaseChat(sosId, t);
+    if (t.toLowerCase().startsWith('/host')) askCaseHost(sosId, t);
     setDraft('');
   };
 
@@ -26,6 +29,25 @@ export default function CaseChat({ sosId }: { sosId: string }) {
           <p className="text-xs text-text-secondary px-1 py-2 text-center">Coordinate here — only people on this case can see it.</p>
         )}
         {messages.map((m) => {
+          if (m.kind === 'host' || m.authorId === 'host') {
+            return (
+              <div key={m.id} className="flex flex-col items-start">
+                <span className="text-[10px] font-semibold text-accent-info px-1">Host AI</span>
+                <span className="max-w-[92%] rounded-2xl px-3 py-1.5 text-sm bg-surface-0 border border-accent-info text-text-primary whitespace-pre-line">
+                  {m.text}
+                </span>
+                {m.chips && m.chips.length > 0 && (
+                  <span className="flex flex-wrap gap-1 px-1 pt-0.5">
+                    {m.chips.map((c) => (
+                      <span key={`${m.id}-${c.label}`} className="text-[9px] rounded-full border border-border-soft px-1.5 py-px text-text-secondary">
+                        {c.label} · {c.ref}
+                      </span>
+                    ))}
+                  </span>
+                )}
+              </div>
+            );
+          }
           const mine = m.authorId === selfResponderId;
           return (
             <div key={m.id} className={`flex flex-col ${mine ? 'items-end' : 'items-start'}`}>
@@ -46,7 +68,7 @@ export default function CaseChat({ sosId }: { sosId: string }) {
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') send(); }}
-          placeholder="Message the case…"
+          placeholder="Message the case… (/host help)"
           className="flex-1 h-10 px-3 rounded-lg border border-border-soft bg-surface-0 text-sm text-text-primary outline-none focus:border-text-primary"
         />
         <button onClick={send} disabled={!draft.trim()} className="w-10 h-10 rounded-lg bg-surface-3 text-text-inverse flex items-center justify-center disabled:opacity-40">
