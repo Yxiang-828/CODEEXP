@@ -13,7 +13,7 @@ import {
 import { fetchMapLayers, type LiveLayer, type LiveLayers, type LayerCategory } from '../../services/mapLayers';
 import { useAppContext } from '../../AppContext';
 import { getDistanceKm } from '../../utils/geo';
-import { mapPick } from '../../state/mapPick';
+import { mapPick, type PickPoint } from '../../state/mapPick';
 import { bekalDirectives } from '../../state/bekalDirectives';
 import { conditionsStore } from '../../state/conditionsStore';
 
@@ -508,7 +508,7 @@ export default function MapCanvas() {
         demoPopupRef.current = null;
         restoreDemoSource();
       },
-      placeMapPick: (at) => {
+      placeMapPick: (at: PickPoint) => {
         if (!mapPick.isRequesting()) mapPick.request();
         mapPick.resolve(at);
       },

@@ -54,6 +54,7 @@ export default function AgentHub() {
         replyCount: (agent: string) => number;
         lastReply: (agent: string) => string;
         busy: () => boolean;
+        conditionsReady: () => boolean;
       };
     };
     w.__kkAgent = {

@@ -445,11 +445,11 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   useLayoutEffect(() => {
     const demoSession = new URLSearchParams(window.location.search).get('demoSession');
     if (!demoSession) return;
-    registerDemoQuickJoin((name: string, nextRole: Role) => {
+    registerDemoQuickJoin((name: string, nextRole: string) => {
       const trimmed = name.trim();
       const id = csot.identity;
       if (id && (id.name !== trimmed || id.role !== nextRole)) leaveRef.current();
-      joinRef.current(trimmed, nextRole);
+      joinRef.current(trimmed, nextRole as Role);
     });
     return () => registerDemoQuickJoin(null);
   }, []);
