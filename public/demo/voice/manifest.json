@@ -13,14 +13,14 @@
       "voice": "director",
       "reference": "7_juilliard",
       "file": "/home/dinosaur/Project/KampungKaki/CODEEXP/public/demo/voice/god-agents.wav",
-      "durationSeconds": 7.68
+      "durationSeconds": 10.48
     },
     {
       "scene": "resident-intro",
       "voice": "resident",
       "reference": "7_juilliard",
       "file": "/home/dinosaur/Project/KampungKaki/CODEEXP/public/demo/voice/resident-intro.wav",
-      "durationSeconds": 8.88
+      "durationSeconds": 8.32
     },
     {
       "scene": "responder-intro",
@@ -62,7 +62,7 @@
       "voice": "director",
       "reference": "7_juilliard",
       "file": "/home/dinosaur/Project/KampungKaki/CODEEXP/public/demo/voice/bekal-intro.wav",
-      "durationSeconds": 9.44
+      "durationSeconds": 9.12
     },
     {
       "scene": "propagation",
@@ -93,11 +93,18 @@
       "durationSeconds": 7.92
     },
     {
+      "scene": "responder-host",
+      "voice": "responder",
+      "reference": "2_amateur",
+      "file": "/home/dinosaur/Project/KampungKaki/CODEEXP/public/demo/voice/responder-host.wav",
+      "durationSeconds": 6.88
+    },
+    {
       "scene": "resident-relief",
       "voice": "resident",
       "reference": "7_juilliard",
       "file": "/home/dinosaur/Project/KampungKaki/CODEEXP/public/demo/voice/resident-relief.wav",
-      "durationSeconds": 7.76
+      "durationSeconds": 8.64
     },
     {
       "scene": "resilience-drop",
@@ -132,21 +139,21 @@
       "voice": "ops",
       "reference": "4_classically_trained",
       "file": "/home/dinosaur/Project/KampungKaki/CODEEXP/public/demo/voice/ops-deploy-bot.wav",
-      "durationSeconds": 8.48
+      "durationSeconds": 8.8
     },
     {
       "scene": "ops-broadcast",
       "voice": "ops",
       "reference": "4_classically_trained",
       "file": "/home/dinosaur/Project/KampungKaki/CODEEXP/public/demo/voice/ops-broadcast.wav",
-      "durationSeconds": 6.16
+      "durationSeconds": 8
     },
     {
       "scene": "resident-safe",
       "voice": "resident",
       "reference": "7_juilliard",
       "file": "/home/dinosaur/Project/KampungKaki/CODEEXP/public/demo/voice/resident-safe.wav",
-      "durationSeconds": 11.76
+      "durationSeconds": 7.68
     },
     {
       "scene": "responder-resolve",
@@ -286,7 +293,7 @@
       "voice": "director",
       "reference": "7_juilliard",
       "file": "/home/dinosaur/Project/KampungKaki/CODEEXP/public/demo/voice/map-ops-camera.wav",
-      "durationSeconds": 6.72
+      "durationSeconds": 6.08
     },
     {
       "scene": "map-ops-rain",
@@ -314,7 +321,7 @@
       "voice": "director",
       "reference": "7_juilliard",
       "file": "/home/dinosaur/Project/KampungKaki/CODEEXP/public/demo/voice/pondok-result.wav",
-      "durationSeconds": 8.56
+      "durationSeconds": 8.88
     },
     {
       "scene": "ops-investigation-action",
@@ -328,7 +335,7 @@
       "voice": "director",
       "reference": "7_juilliard",
       "file": "/home/dinosaur/Project/KampungKaki/CODEEXP/public/demo/voice/ops-broadcast-action.wav",
-      "durationSeconds": 7.76
+      "durationSeconds": 9.44
     },
     {
       "scene": "resident-alert-action",
