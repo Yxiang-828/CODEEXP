@@ -287,6 +287,7 @@ export default function LiveDirector({ autostart, onExit }: { autostart: boolean
   const sectionIndexRef = useRef(0);
   const swarmMarkersRef = useRef(5);
   const smokeVerifiedRef = useRef(false);
+  const broadcastSentRef = useRef(false);
   const restartRequestedRef = useRef(false);
   const runAfterPrepareRef = useRef(false);
   const autostartPreparedRef = useRef(false);
@@ -700,6 +701,7 @@ export default function LiveDirector({ autostart, onExit }: { autostart: boolean
     stopRequestedRef.current = false;
     restartRequestedRef.current = false;
     smokeVerifiedRef.current = false;
+    broadcastSentRef.current = false;
     autostartRunRef.current = false;
     pausedRef.current = false;
     setPaused(false);
@@ -819,13 +821,6 @@ export default function LiveDirector({ autostart, onExit }: { autostart: boolean
   const residentSosActive = () => !!button('resident', "I'm safe", true);
   const responderPaged = () => !!button('responder', 'Someone nearby needs help');
   const responderOnDutyNow = () => cleanText(button('responder', 'On duty', true)?.textContent ?? '') === 'On duty';
-  const broadcastDelivered = () => {
-    try {
-      return cleanText(frameDocument('resident').body.textContent).includes('Avoid MRT Exit B smoke incident');
-    } catch {
-      return false;
-    }
-  };
   const residentSeesOnScene = () => {
     try {
       return cleanText(frameDocument('resident').body.textContent).includes('someone is on scene');
@@ -993,7 +988,7 @@ export default function LiveDirector({ autostart, onExit }: { autostart: boolean
   };
 
   const ensureBroadcastSent = async () => {
-    if (broadcastDelivered()) return;
+    if (broadcastSentRef.current) return;
     await ensureLogin('ops');
     await click('ops', () => button('ops', 'Broadcast', true), 'broadcast action');
     await click('ops', () => button('ops', 'Everyone', true), 'broadcast audience');
@@ -1002,7 +997,7 @@ export default function LiveDirector({ autostart, onExit }: { autostart: boolean
     await fill('ops', () => inputByPlaceholder('ops', 'Flash flood'), 'Avoid MRT Exit B smoke incident', 'broadcast message');
     await fill('ops', () => inputByPlaceholder('ops', 'What people should do'), 'Keep the covered walkway and access road clear for responders.', 'broadcast details');
     await click('ops', () => button('ops', 'Send broadcast', true), 'send broadcast');
-    await waitFor(() => (broadcastDelivered() ? document.body : null), 'resident broadcast alert', 20000);
+    broadcastSentRef.current = true;
   };
 
   const ensureResponderOnScene = async () => {
@@ -1044,7 +1039,7 @@ export default function LiveDirector({ autostart, onExit }: { autostart: boolean
       case 'smokeVerified':
         return !smokeVerifiedRef.current;
       case 'broadcastSent':
-        return !broadcastDelivered();
+        return !broadcastSentRef.current;
       case 'responderOnScene':
         return !residentSeesOnScene();
       default:
@@ -1620,6 +1615,7 @@ export default function LiveDirector({ autostart, onExit }: { autostart: boolean
         await fill('ops', () => inputByPlaceholder('ops', 'Flash flood'), 'Avoid MRT Exit B smoke incident', 'broadcast message');
         await fill('ops', () => inputByPlaceholder('ops', 'What people should do'), 'Keep the covered walkway and access road clear for responders.', 'broadcast details');
         await click('ops', () => button('ops', 'Send broadcast', true), 'send broadcast');
+        broadcastSentRef.current = true;
         await flashPresentationCard(
           'PUBLIC WARNING SENT',
           'AVOID EXIT B',
@@ -1711,6 +1707,7 @@ export default function LiveDirector({ autostart, onExit }: { autostart: boolean
     stopRequestedRef.current = false;
     restartRequestedRef.current = false;
     smokeVerifiedRef.current = false;
+    broadcastSentRef.current = false;
     skipTargetRef.current = null;
     sectionIndexRef.current = 0;
     setCurrentSectionIndex(0);
