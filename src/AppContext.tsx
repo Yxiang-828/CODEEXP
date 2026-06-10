@@ -445,7 +445,8 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   useLayoutEffect(() => {
     const demoSession = new URLSearchParams(window.location.search).get('demoSession');
     if (!demoSession) return;
-    registerDemoQuickJoin((name: string, nextRole: Role) => {
+    registerDemoQuickJoin((name: string, roleName: string) => {
+      const nextRole = roleName as Role;
       const trimmed = name.trim();
       const id = csot.identity;
       if (id && (id.name !== trimmed || id.role !== nextRole)) leaveRef.current();

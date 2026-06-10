@@ -508,7 +508,7 @@ export default function MapCanvas() {
         demoPopupRef.current = null;
         restoreDemoSource();
       },
-      placeMapPick: (at) => {
+      placeMapPick: (at: { lng: number; lat: number }) => {
         if (!mapPick.isRequesting()) mapPick.request();
         mapPick.resolve(at);
       },

@@ -4,6 +4,10 @@ A live, role-aware map of Singapore for citizens, responders, and ops.
 One map. Three views. Real OneMap basemap. Real NEA data. Shared truth
 store so an action by one role appears for the others in the same tick.
 
+For the complete Docker stack, backend, AI, and both demos, follow
+`START-HERE.md` and run `.\start.ps1` on Windows or `./start.sh` on Linux/macOS.
+The `build.*` and `run.*` scripts below are frontend-only developer helpers.
+
 See `../BLUEPRINT.md` in the parent folder for the full product blueprint
 including every data source we plan to wire (Tier A → D).
 
@@ -11,7 +15,7 @@ including every data source we plan to wire (Tier A → D).
 
 ## Prerequisites
 
-- **Node.js 18+** — https://nodejs.org
+- **Node.js 20+** — https://nodejs.org
 - That's it. No accounts, no API keys, no Gemini setup required for this
   section. The NEA endpoints we hit are public and CORS-open.
 
@@ -23,10 +27,10 @@ Installs dependencies and produces a production bundle in `dist/`.
 
 ```bash
 # Linux / macOS
-./build.sh
+./build.sh --no-deploy
 
 # Windows
-build.bat
+build.bat --no-deploy
 ```
 
 If `./build.sh` is not executable: `chmod +x build.sh run.sh`.
@@ -35,31 +39,18 @@ If `./build.sh` is not executable: `chmod +x build.sh run.sh`.
 
 ## Run
 
-After `build.sh`, three modes:
+After `build.sh --no-deploy`, two modes:
 
 ```bash
 ./run.sh           # build (if needed) + preview on http://localhost:5173
 ./run.sh dev       # vite dev server on http://localhost:3000 (hot reload)
-./run.sh share     # build + preview + public cloudflared tunnel
 ```
 
-Windows: `run.bat`, `run.bat dev`, `run.bat share`.
+Windows: `run.bat`, `run.bat dev`.
 
 All commands kill anything already listening on `3000` / `4173` / `5173`
 before starting. The preview server binds to `0.0.0.0`, so anyone on
 your LAN can hit `http://<your-LAN-IP>:5173`.
-
-### Share publicly (no signup)
-
-```bash
-./run.sh share
-```
-
-Runs the preview, then opens a Cloudflare tunnel. After ~10 s a
-`https://*.trycloudflare.com` URL is printed in the terminal — send it
-to anyone, on any network, anywhere.
-
----
 
 ## What you'll see when it opens
 
@@ -122,11 +113,6 @@ Should return `HTTP/2 200`.
 **NEA chip in top chrome says "fetching…" forever** — your network or
 ad-blocker is blocking `api.data.gov.sg`. Confirm with:
 `curl -sI https://api.data.gov.sg/v1/environment/psi`.
-
-**Anyone on the internet** — use `./run.sh share`. Don't use the LAN IP
-for non-LAN users.
-
----
 
 ## Where the original AI Studio template went
 

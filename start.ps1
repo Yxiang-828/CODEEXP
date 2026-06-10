@@ -6,7 +6,12 @@
 #
 # Prereqs it checks for you: Docker Desktop running, Ollama signed in (for the AI).
 # If PowerShell blocks the script, run once:  Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
-param([string]$Cmd = "")
+param(
+  [Parameter(Position = 0)]
+  [string]$Cmd = "",
+  [Alias("d")]
+  [switch]$Detach
+)
 $ErrorActionPreference = "Stop"
 Set-Location -Path $PSScriptRoot
 
@@ -24,7 +29,7 @@ if ($Cmd -eq "down") {
 if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
   Die "Docker not found. Install Docker Desktop: https://docker.com/products/docker-desktop"
 }
-docker info *> $null
+docker info --format '{{.ServerVersion}}' *> $null
 if ($LASTEXITCODE -ne 0) { Die "Docker is installed but not running. Start Docker Desktop, then re-run." }
 docker compose version *> $null
 if ($LASTEXITCODE -ne 0) { Die "The 'docker compose' plugin is missing. Update Docker Desktop." }
@@ -48,7 +53,7 @@ try {
 
 # 4 - one build + run.
 Say "building + starting the whole stack (first run pulls images / installs deps - a few minutes)..."
-if ($Cmd -eq "-Detach" -or $Cmd -eq "-d") {
+if ($Detach -or $Cmd -eq "-Detach" -or $Cmd -eq "-d") {
   docker compose -f infra/docker-compose.yml up -d --build
   Say "Up. App: http://localhost:3000   .   Live demo: http://localhost:3000/?demo=director&autostart=1"
   Say "Logs: docker compose -f infra/docker-compose.yml logs -f   .   Stop: .\start.ps1 down"

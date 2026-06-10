@@ -25,7 +25,8 @@ and committed.
 **Windows (PowerShell):** `.\start.ps1`  ·  **Mac / Linux:** `./start.sh`
 
 First run takes a few minutes (pulls images, installs deps, builds); after that it's
-seconds. Then open **http://localhost:3000**. Stop with `Ctrl-C` or `./start.sh down`.
+seconds. Then open **http://localhost:3000**. Stop with `Ctrl-C`,
+`.\start.ps1 down` on Windows, or `./start.sh down` on Linux/macOS.
 
 ## The two live demos
 
@@ -36,6 +37,7 @@ them from the buttons bottom-left of the app, or by URL:
 |---|---|---|
 | Quick showcase | `http://localhost:3000/?demo=quick&autostart=1` | Fast, cutscene-driven showcase |
 | Live demo | `http://localhost:3000/?demo=director&autostart=1` | Full three-client run over MQTT |
+| Live demo, captions only | `http://localhost:3000/?demo=director&autostart=1&silent=1` | Full-paced review with voice muted |
 
 Voices are pre-rendered Qwen3-TTS WAVs already in `public/demo/voice*/`. Nothing to
 generate. (To *re-render* them you'd need the Qwen toolchain — see "Re-rendering" below.)
@@ -55,7 +57,7 @@ The web container reaches the host's Ollama at `host.docker.internal:11434`.
 
 Weather/PSI/traffic layers need free gov-data keys. The app runs fine without them
 (those layers show "unavailable" — they never fake data). To enable, edit
-`CODEEXP/.env.local` (created on first run from `.env.example`) and fill
+`.env.local` in the repository root (created on first run from `.env.example`) and fill
 `DATAMALL_ACCOUNT_KEY` / `ONEMAP_API_KEY`, then restart.
 
 ## Transfer: GitHub, not a Docker image
@@ -71,6 +73,6 @@ Only if you change narration. Needs the Qwen TTS toolchain at
 `~/.aiko-core/.../qwentts.cpp` (binary + models + reference voices) and ffmpeg:
 ```
 cd CODEEXP
-node scripts/ai-demo-voice.mjs --render        # the live demo's voices
-node scripts/proper-demo-voice.mjs --render     # the proper/LiveDirector voices
+node scripts/ai-demo-voice.mjs --render        # the canonical long live demo
+node scripts/quick-demo-voice.mjs --render     # the one-minute quick showcase
 ```
