@@ -424,10 +424,6 @@ export default function LiveDirector({ autostart, onExit }: { autostart: boolean
     await wait(fast ? 20 : 120);
   };
 
-  const flashEvidenceCard = async (title: string, headline: string, detail: string) => {
-    await flashPresentationCard('MAP DATA USED', title, headline, detail);
-  };
-
   const flashCutscene = async (title: string, detail: string) => {
     const id = ++cutsceneIdRef.current;
     setCutscene({ id, image: '/demo/cutscenes/mrt-ebike-fire.png', title, detail });
@@ -509,53 +505,6 @@ export default function LiveDirector({ autostart, onExit }: { autostart: boolean
     return t.includes('hospital') || t.includes('aed');
   };
 
-  const inspectMapLayer = async (
-    role: RoleKey,
-    sceneId: string,
-    layerId: string,
-    toggleLabel: string,
-    spokenLabel: string,
-    detail: string,
-  ) => {
-    setChapter(`${actors[role].roleLabel} map evidence · ${spokenLabel}`);
-    frameWindow(role).__kkMapDemo?.focusLocation(INCIDENT_LOCATION, 15.3);
-    await ensureLayerOn(role, toggleLabel);
-    await collapseLayerPanel(role);
-    await wait(fast ? 80 : 360);
-    const sample = await waitFor(
-      () => frameWindow(role).__kkMapDemo?.showLayerSample(layerId, INCIDENT_LOCATION) ?? null,
-      `${role} ${spokenLabel} sample`,
-      12000,
-    );
-    await moveCursorToFramePoint(role, sample);
-    setCursor((current) => ({ ...current, down: true }));
-    await wait(fast ? 50 : 170);
-    setCursor((current) => ({ ...current, down: false }));
-    const screenPoint = framePointToScreen(role, sample);
-    if (screenPoint) {
-      const id = ++focusBoxIdRef.current;
-      const w = 196;
-      const h = 118;
-      setFocusBox({
-        id,
-        x: Math.min(window.innerWidth - w - 14, Math.max(14, Math.round(screenPoint.x - w / 2))),
-        y: Math.min(window.innerHeight - h - 124, Math.max(40, Math.round(screenPoint.y - h * 0.82))),
-        w,
-        h,
-        label: `${spokenLabel}: ${sample.label}`,
-      });
-      await narrate(sceneId, 'Director', detail);
-      await wait(fast ? 120 : 900);
-      setFocusBox((current) => current?.id === id ? null : current);
-    } else {
-      await narrate(sceneId, 'Director', detail);
-    }
-    frameWindow(role).__kkMapDemo?.clearEvidence();
-    if (!keepHealthLayerOn(toggleLabel)) await ensureLayerOff(role, toggleLabel);
-    await collapseLayerPanel(role);
-    await wait(fast ? 40 : 220);
-  };
-
   const actionBeat = (nextChapter: string, text: string) => {
     setChapter(nextChapter);
     setSpeaker('Director');
@@ -614,40 +563,6 @@ export default function LiveDirector({ autostart, onExit }: { autostart: boolean
     }
   };
 
-  const previewOpsContext = async () => {
-    if (!button('ops', 'Emergency access road blocked')) {
-      const opsToggle = button('ops', 'Ops', true);
-      if (opsToggle) await click('ops', () => opsToggle, 'open ops context');
-    }
-    const liveCase = button('ops', 'Medical · Mei Ling') ?? button('ops', 'Medical');
-    if (liveCase) {
-      actionBeat(
-        'Ops · Pondok checks the live case',
-        'Pondok starts with the active medical S O S, including its category, member count, and private-case boundary.',
-      );
-      await moveCursor('ops', liveCase);
-      await wait(fast ? 300 : 700);
-    }
-    const accessReport = button('ops', 'Emergency access road blocked');
-    if (accessReport) {
-      actionBeat(
-        'Ops · Pondok checks supporting reports',
-        'The blocked-access report remains supporting context, separate from the medical casualty.',
-      );
-      await moveCursor('ops', accessReport);
-      await wait(fast ? 300 : 700);
-    }
-    const verifiedSmoke = button('ops', 'Smoke at MRT Exit B');
-    if (verifiedSmoke) {
-      actionBeat(
-        'Ops · Pondok checks verified context',
-        'The verified smoke incident stays on the shared map while Pondok compares responder fit.',
-      );
-      await moveCursor('ops', verifiedSmoke);
-      await wait(fast ? 300 : 700);
-    }
-  };
-
   const spawnSwarm = async () => {
     if (!sessionId) throw new Error('Demo session has not started');
     return api<SwarmReceipt>(`/api/demo/${sessionId}/swarm`, { method: 'POST' });
@@ -699,11 +614,7 @@ export default function LiveDirector({ autostart, onExit }: { autostart: boolean
     const actor = actors[role];
     await switchCamera(role, `${actor.roleLabel} identity`);
     await flashRoleCard(role);
-    await narrate(
-      `login-${role}`,
-      'Director',
-      `${actor.name} signs in as ${actor.roleLabel}. The demo waits for each screen and enabled control before moving on.`,
-    );
+    actionBeat(`${actor.roleLabel} identity`, `${actor.name} signs in as ${actor.roleLabel}.`);
     await click(role, () => button(role, 'Explore in demo mode'), 'demo mode button');
     await waitFor(
       () => inputByPlaceholder(role, 'Mei Ling'),
@@ -772,12 +683,11 @@ export default function LiveDirector({ autostart, onExit }: { autostart: boolean
     return cls.includes('bg-surface-3') || cls.includes('text-text-inverse');
   };
 
-  const ensureProfileChip = async (role: RoleKey, sceneId: string, label: string, nextCaption: string) => {
-    await narrate(sceneId, 'Director', nextCaption);
+  const selectProfileChip = async (role: RoleKey, label: string) => {
     const chip = await waitFor(() => button(role, label, true), `${role} ${label} profile chip`);
     if (chipSelected(chip)) {
       await moveCursor(role, chip);
-      await wait(fast ? 40 : 160);
+      await wait(fast ? 20 : 80);
     } else {
       await click(role, () => button(role, label, true), `${role} ${label} profile chip`);
     }
@@ -1000,8 +910,8 @@ export default function LiveDirector({ autostart, onExit }: { autostart: boolean
       await click('resident', () => frameDocument('resident').querySelector('button[title="Your profile"]'), 'resident profile');
       await fill('resident', () => inputByLabel('resident', 'Phone'), '9000 2810', 'resident phone');
       await fill('resident', () => inputByLabel('resident', 'Allergies'), 'No known drug allergies', 'resident allergies');
-      await ensureProfileChip('resident', 'profile-meiling-asthma', 'Asthma', 'Mei Ling marks asthma so smoke guidance can use her actual aid card.');
-      await ensureProfileChip('resident', 'profile-meiling-inhaler', 'Inhaler', 'She also records that she carries an inhaler. Only a responder who joins her S O S can see this.');
+      await selectProfileChip('resident', 'Asthma');
+      await selectProfileChip('resident', 'Inhaler');
       await click('resident', () => button('resident', 'Save', true), 'save resident profile');
       await closeSheet('resident', 'Profile');
 
@@ -1012,8 +922,8 @@ export default function LiveDirector({ autostart, onExit }: { autostart: boolean
         'I am Aisha, a nearby community responder. I begin in lepak mode: no mission, no private details, and no false urgency until I choose to go on duty.',
       );
       await click('responder', () => frameDocument('responder').querySelector('button[title="Your profile"]'), 'responder profile');
-      await ensureProfileChip('responder', 'profile-aisha-medical', 'Medical', 'Aisha marks medical support so the app can match her to a Medical S O S.');
-      await ensureProfileChip('responder', 'profile-aisha-hazard', 'Hazard', 'She also marks hazard support because smoke and blocked access affect this response.');
+      await selectProfileChip('responder', 'Medical');
+      await selectProfileChip('responder', 'Hazard');
       await click('responder', () => button('responder', 'Save', true), 'save responder profile');
       await closeSheet('responder', 'Profile');
 
@@ -1041,7 +951,6 @@ export default function LiveDirector({ autostart, onExit }: { autostart: boolean
           await previewMapLayer('resident', 'rainfall', 'Rainfall', 'rainfall evidence', 'Pelita is checking the cached rainfall reading already available on Mei Ling’s map.');
         },
       );
-      await flashEvidenceCard('PELITA · CONDITIONS', 'CACHE SNAPSHOT', 'Pelita reads the same live conditions snapshot already powering the map.');
 
       await switchCamera('responder', 'Responder · availability and map');
       await narrate(
@@ -1080,10 +989,8 @@ export default function LiveDirector({ autostart, onExit }: { autostart: boolean
         'Bekal has returned the nearest A E D, an emergency hospital, and immediate safety guidance. Those skill results are also rendered as map pins.',
         async () => {
           await previewMapLayer('resident', 'aeds', 'AED', 'nearest AED', 'While Bekal checks, the map exposes the nearest bundled A E D around the S O S.');
-          await previewMapLayer('resident', 'hospitals', 'Hospital', 'emergency hospital', 'The emergency-hospital layer gives Bekal a concrete escalation point without another upstream fetch.');
         },
       );
-      await flashEvidenceCard('BEKAL · AED + HOSPITAL SKILLS', 'MAP PINS GENERATED', 'Bekal calls the AED and hospital skills on bundled data — no upstream API — then the app renders those directives as real pins.');
       await waitFor(() => button('responder', 'Someone nearby needs help'), 'responder page');
 
       await seedScenario();
@@ -1101,19 +1008,6 @@ export default function LiveDirector({ autostart, onExit }: { autostart: boolean
       );
 
       await switchCamera('responder', 'Responder · accepts with map evidence');
-      await focusSosArea(
-        'responder',
-        'focus-responder-sos',
-        'Aisha opens the matched S O S area first. She checks resources and access around Exit B, not random markers elsewhere in Singapore.',
-      );
-      await inspectMapLayer(
-        'responder',
-        'map-aisha-hospital',
-        'hospitals',
-        'Hospital',
-        'nearest A&E hospital',
-        'Aisha opens the nearest emergency hospital to Exit B — the same pin Host and Bekal use from the bundled map layer.',
-      );
       await narrate(
         'responder-join',
         'Aisha',
@@ -1130,16 +1024,6 @@ export default function LiveDirector({ autostart, onExit }: { autostart: boolean
       const swarm = await spawnSwarm();
       if (!swarm.responders) throw new Error('God Mode swarm did not attach responders to the SOS');
       const renderedSwarmMarkers = Math.min(swarm.responders, 5);
-      await flashPresentationCard(
-        'SYNTHETIC DEMO RESPONDERS',
-        `${swarm.responders} FIXTURE USERS`,
-        'LIVE APPROACH MARKERS',
-        `Nearest ${renderedSwarmMarkers} shown on the map; the full roster stays in the case room.`,
-      );
-      await fill('responder', () => inputByPlaceholder('responder', 'Message the case'), 'Mei Ling — on my way from the north exit, about ninety seconds. Your aid card shows asthma, so keep your inhaler close in this smoke. If the elderly man is not breathing normally, start CPR and send someone safe toward the marked AED.', 'case chat');
-      const chatInput = await waitFor(() => inputByPlaceholder('responder', 'Message the case'), 'case chat input');
-      const sendChat = chatInput.parentElement?.querySelector('button') as HTMLButtonElement | null;
-      if (sendChat) await click('responder', () => sendChat, 'send case chat');
 
       await narrate(
         'responder-host',
@@ -1172,19 +1056,6 @@ export default function LiveDirector({ autostart, onExit }: { autostart: boolean
       );
 
       await switchCamera('ops', 'Ops · verify before broadcast');
-      await focusSosArea(
-        'ops',
-        'focus-ops-sos',
-        'Nadia zooms directly to Exit B. Every public-data popup that follows is the nearest available reading or facility to this S O S.',
-      );
-      await inspectMapLayer(
-        'ops',
-        'map-ops-hospital',
-        'hospitals',
-        'Hospital',
-        'nearest A&E hospital',
-        'Nadia opens the nearest emergency hospital to the S O S, giving the case a concrete escalation point if the casualty worsens.',
-      );
       await click('ops', () => button('ops', 'Ops'), 'ops queue');
       await click('ops', () => button('ops', 'Smoke at MRT Exit B'), 'smoke report');
       await click('ops', () => button('ops', 'Verify → publish as incident'), 'verify report');
@@ -1197,40 +1068,15 @@ export default function LiveDirector({ autostart, onExit }: { autostart: boolean
         'Aisha|Wei Jian|AED|medical|responder|SOS',
         'pondok-result',
         'Pondok has compared the live roster with the case and highlighted skill-fit candidates for medical and A E D support. Nadia still decides every deployment.',
-        previewOpsContext,
+        async () => {},
       );
-      await flashEvidenceCard('PONDOK · ROSTER + FIT', 'INFORMS, NEVER ORDERS', 'Pondok reads the on-duty roster, cases and reports from the CSOT snapshot. It gives skill fit and defers the send decision to the operator.');
       setChapter('Ops · coordination and dispatch');
-      await narrate(
-        'ops-deploy-bot',
-        'Nadia',
-        'Now my job is coordination. The medical S O S continues in its private case room, while I send a separate responder to investigate the blocked access road.',
-      );
-      await narrate(
-        'ops-investigation-action',
-        'Director',
-        'Nadia opens the blocked-access report and creates a separate investigation instead of confusing it with the medical casualty.',
-      );
-      await click('ops', () => button('ops', 'Emergency access road blocked'), 'access road report');
-      await click('ops', () => button('ops', 'Dispatch to investigate'), 'dispatch access investigation');
-      await click('ops', () => button('ops', 'Send', true), 'send investigation');
-      await flashPresentationCard(
-        'DISPATCH CREATED',
-        'MEDICAL SOS CONTINUES',
-        'ACCESS CHECK DISPATCHED',
-        'The medical case and road-access investigation remain separate, but share the same live map.',
-      );
 
       setChapter('Ops · public warning');
       await narrate(
         'ops-broadcast',
         'Nadia',
-        'The smoke report is verified and blocked access remains an active reported risk, so I warn people away from the station exit without exposing the private case room.',
-      );
-      await narrate(
-        'ops-broadcast-action',
-        'Director',
-        'Nadia sends the warning to citizens and responders, labels the area Exit B, marks it Emergency, and gives one clear public action: keep the walkway and access road clear.',
+        'The smoke report is verified, so I warn people away from the station exit without exposing the private case room.',
       );
       await click('ops', () => button('ops', 'Broadcast', true), 'broadcast action');
       await click('ops', () => button('ops', 'Everyone', true), 'broadcast audience');
@@ -1250,7 +1096,7 @@ export default function LiveDirector({ autostart, onExit }: { autostart: boolean
       await narrate(
         'resilience-drop',
         'Director',
-        "Now I break only Aisha's route to M Q T T. The app may keep working locally, but it must not pretend the broker has delivered her arrival.",
+        "Now I break Aisha's M Q T T link. She marks on scene locally, but Mei Ling must not see a false arrival until the broker delivers it.",
       );
       frameWindow('responder').__kkDemo?.setTransportOnline(false);
       setNetworkState('stuttering');
@@ -1263,11 +1109,6 @@ export default function LiveDirector({ autostart, onExit }: { autostart: boolean
       );
 
       await switchCamera('resident', 'Citizen · no false acknowledgement');
-      await narrate(
-        'resident-before-reconcile',
-        'Director',
-        "Mei Ling still has not received Aisha's arrival. That restraint is important: no false acknowledgement before M Q T T delivers it.",
-      );
       frameWindow('responder').__kkDemo?.setTransportOnline(true);
       setNetworkState('online');
       await waitFor(
@@ -1282,11 +1123,7 @@ export default function LiveDirector({ autostart, onExit }: { autostart: boolean
       );
 
       await switchCamera('resident', 'Citizen · trusted alert and closure');
-      await narrate(
-        'resident-alert-action',
-        'Director',
-        'The ops warning has reached Mei Ling. The demo opens her alerts to show the delivered result before closing the case.',
-      );
+      actionBeat('Citizen · alerts', 'The ops warning has reached Mei Ling. The demo opens her alerts before closing the case.');
       await click('resident', () => frameDocument('resident').querySelector('button[title="Alerts"]'), 'resident alerts');
       await waitFor(() => cleanText(frameDocument('resident').body.textContent).includes('Avoid MRT Exit B smoke incident') ? document.body : null, 'resident broadcast');
       await narrate(
@@ -1315,17 +1152,12 @@ export default function LiveDirector({ autostart, onExit }: { autostart: boolean
       await narrate(
         'outcome',
         'Director',
-        'Hospitals, A E Ds, traffic, cameras, weather, responders, chat, alerts, and state changes all served one story: map evidence plus M Q T T coordination.',
+        'Map evidence, case room, Host, M Q T T, and alerts served one story. This performance is complete — I will now remove everything this session created.',
       );
 
       await switchCamera('resident', 'Clean teardown · Director');
       const before = await api<DemoStatus>(`/api/demo/${sessionId}/status`);
       setStatus(before);
-      await narrate(
-        'cleanup',
-        'Director',
-        'This performance is complete. I will remove the bots, users, reports, case messages, alerts, presence, and logs created by this session.',
-      );
       await cleanup();
     } catch (caught) {
       const requestedStop = caught instanceof DemoStopped;
