@@ -13,7 +13,7 @@
       "voice": "director",
       "reference": "7_juilliard",
       "file": "/home/dinosaur/Project/KampungKaki/CODEEXP/public/demo/voice/god-agents.wav",
-      "durationSeconds": 10.48
+      "durationSeconds": 9.28
     },
     {
       "scene": "resident-intro",
@@ -55,7 +55,7 @@
       "voice": "resident",
       "reference": "7_juilliard",
       "file": "/home/dinosaur/Project/KampungKaki/CODEEXP/public/demo/voice/resident-sos.wav",
-      "durationSeconds": 9.68
+      "durationSeconds": 7.52
     },
     {
       "scene": "bekal-intro",
@@ -105,13 +105,6 @@
       "reference": "2_amateur",
       "file": "/demo/voice/responder-host.wav",
       "durationSeconds": 6.88
-    },
-    {
-      "scene": "responder-host-result",
-      "voice": "responder",
-      "reference": "2_amateur",
-      "file": "public/demo/voice/responder-host-result.wav",
-      "durationSeconds": 8.64
     },
     {
       "scene": "resident-relief",
@@ -286,7 +279,7 @@
       "voice": "director",
       "reference": "7_juilliard",
       "file": "/home/dinosaur/Project/KampungKaki/CODEEXP/public/demo/voice/focus-resident-swarm.wav",
-      "durationSeconds": 6.56
+      "durationSeconds": 7.76
     },
     {
       "scene": "focus-ops-sos",
@@ -328,7 +321,7 @@
       "voice": "director",
       "reference": "7_juilliard",
       "file": "/home/dinosaur/Project/KampungKaki/CODEEXP/public/demo/voice/map-ops-hospital.wav",
-      "durationSeconds": 6.48
+      "durationSeconds": 7.68
     },
     {
       "scene": "pondok-result",
@@ -342,7 +335,7 @@
       "voice": "director",
       "reference": "7_juilliard",
       "file": "/home/dinosaur/Project/KampungKaki/CODEEXP/public/demo/voice/ops-investigation-action.wav",
-      "durationSeconds": 6.24
+      "durationSeconds": 5.84
     },
     {
       "scene": "ops-broadcast-action",

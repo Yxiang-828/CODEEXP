@@ -45,7 +45,7 @@
       "id": "god-agents",
       "voice": "director",
       "speaker": "God Mode",
-      "narration": "Now I add disposable witness reports, rain pressure, and synthetic demo responders. They support the S O S presentation; they are not autonomous A I agents or the emergency trigger."
+      "narration": "Now I add disposable bystander reports, rain pressure, and synthetic demo responders. They support the S O S presentation; they are not autonomous A I agents or the emergency trigger."
     },
     {
       "id": "resident-intro",
@@ -81,7 +81,7 @@
       "id": "resident-sos",
       "voice": "resident",
       "speaker": "Citizen, Mei Ling",
-      "narration": "Now it is an emergency. An elderly man near the smoke has collapsed and is not responding properly. I am the witness, he is the casualty, and this needs a Medical S O S."
+      "narration": "Now it is an emergency. The e-bike smoke has set off my asthma. I am dizzy and short of breath, so I raise a Medical S O S for myself."
     },
     {
       "id": "bekal-intro",
@@ -273,7 +273,7 @@
       "id": "focus-resident-swarm",
       "voice": "director",
       "speaker": "AI Director",
-      "narration": "Mei Ling returns to the S O S area. The close map now shows the casualty point and responder approach markers together."
+      "narration": "Mei Ling returns to the S O S area. The close map now shows her own S O S point and the responder approach markers together."
     },
     {
       "id": "focus-ops-sos",
@@ -309,7 +309,7 @@
       "id": "map-ops-hospital",
       "voice": "director",
       "speaker": "AI Director",
-      "narration": "Nadia opens the nearest emergency hospital to the S O S, giving the case a concrete escalation point if the casualty worsens."
+      "narration": "Nadia opens the nearest emergency hospital to the S O S, giving the case a concrete escalation point if her condition worsens."
     },
     {
       "id": "pondok-result",
@@ -321,7 +321,7 @@
       "id": "ops-investigation-action",
       "voice": "director",
       "speaker": "AI Director",
-      "narration": "Nadia opens the blocked-access report and creates a separate investigation instead of confusing it with the medical casualty."
+      "narration": "Nadia opens the blocked-access report and creates a separate investigation instead of confusing it with the medical case."
     },
     {
       "id": "ops-broadcast-action",

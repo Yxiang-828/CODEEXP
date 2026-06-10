@@ -940,7 +940,7 @@ export default function LiveDirector({ autostart, onExit }: { autostart: boolean
     await fill(
       'resident',
       () => inputByPlaceholder('resident', 'friend collapsed'),
-      'Nicoll Highway MRT Exit B: e-bike smoke at the covered walkway. Elderly man collapsed; I am the witness, he is the casualty. Need AED and responders.',
+      'Nicoll Highway MRT Exit B: e-bike smoke at the covered walkway set off my asthma — feeling dizzy and short of breath. Need responders.',
       'SOS details',
     );
     await click('resident', () => button('resident', 'Send for help', true), 'send SOS');
@@ -1476,11 +1476,11 @@ export default function LiveDirector({ autostart, onExit }: { autostart: boolean
         await narrate(
           'resident-sos',
           'Mei Ling',
-          'Now it is an emergency. An elderly man near the smoke has collapsed and is not responding properly. I am the witness, he is the casualty, and this needs a Medical S O S.',
+          'Now it is an emergency. The e-bike smoke has set off my asthma. I am dizzy and short of breath, so I raise a Medical S O S for myself.',
         );
         await click('resident', () => button('resident', 'Need help', true), 'need help');
         await click('resident', () => button('resident', 'Medical', true), 'medical SOS');
-        await fill('resident', () => inputByPlaceholder('resident', 'friend collapsed'), 'Nicoll Highway MRT Exit B: e-bike smoke at the covered walkway. Elderly man collapsed; I am the witness, he is the casualty. Need AED and responders.', 'SOS details');
+        await fill('resident', () => inputByPlaceholder('resident', 'friend collapsed'), 'Nicoll Highway MRT Exit B: e-bike smoke at the covered walkway set off my asthma — feeling dizzy and short of breath. Need responders.', 'SOS details');
         await click('resident', () => button('resident', 'Send for help', true), 'send SOS');
         await focusSosArea(
           'resident',
@@ -1495,7 +1495,7 @@ export default function LiveDirector({ autostart, onExit }: { autostart: boolean
         await askAiKaki(
           'resident',
           'Bekal',
-          'Elderly man collapsed after e-bike smoke at Nicoll Highway MRT Exit B. I am the witness; he is the casualty. Which AED and A&E hospital should bystanders use, and what should I do while Aisha is coming?',
+          'The e-bike smoke at Nicoll Highway MRT Exit B set off my asthma — I am dizzy and short of breath. Which A&E hospital is nearest, and what should I do while Aisha is on the way?',
           'AED|hospital|A&E|CPR|995',
           'bekal-result',
           'Bekal has returned the nearest A E D, an emergency hospital, and immediate safety guidance. Those skill results are also rendered as map pins.',
@@ -1570,7 +1570,7 @@ export default function LiveDirector({ autostart, onExit }: { autostart: boolean
         await focusSosArea(
           'resident',
           'focus-resident-swarm',
-          'Mei Ling returns to the S O S area. The close map now shows the casualty point and responder approach markers together.',
+          'Mei Ling returns to the S O S area. The close map now shows her own S O S point and the responder approach markers together.',
         );
         await narrate(
           'resident-relief',
@@ -1587,7 +1587,7 @@ export default function LiveDirector({ autostart, onExit }: { autostart: boolean
         await askAiKaki(
           'ops',
           'Pondok',
-          'Ops picture for Exit B: active medical SOS for collapsed elderly casualty, supporting smoke and access reports, on-duty responders. Which responder fits AED support and what facts should I verify before broadcast?',
+          'Ops picture for Exit B: active medical SOS — asthmatic citizen dizzy and short of breath from e-bike smoke, supporting smoke and access reports, on-duty responders. Which responder fits medical support and what facts should I verify before broadcast?',
           'Aisha|Wei Jian|AED|medical|responder|SOS',
           'pondok-result',
           'Pondok has compared the live roster with the case and highlighted skill-fit candidates for medical and A E D support. Nadia still decides every deployment.',
