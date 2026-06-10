@@ -286,6 +286,7 @@ export default function LiveDirector({ autostart, onExit }: { autostart: boolean
   const skipTargetRef = useRef<number | null>(null);
   const sectionIndexRef = useRef(0);
   const swarmMarkersRef = useRef(5);
+  const smokeVerifiedRef = useRef(false);
   const restartRequestedRef = useRef(false);
   const runAfterPrepareRef = useRef(false);
   const autostartPreparedRef = useRef(false);
@@ -698,6 +699,7 @@ export default function LiveDirector({ autostart, onExit }: { autostart: boolean
   const prepare = async () => {
     stopRequestedRef.current = false;
     restartRequestedRef.current = false;
+    smokeVerifiedRef.current = false;
     autostartRunRef.current = false;
     pausedRef.current = false;
     setPaused(false);
@@ -980,11 +982,14 @@ export default function LiveDirector({ autostart, onExit }: { autostart: boolean
   };
 
   const ensureSmokeVerified = async () => {
+    if (smokeVerifiedRef.current) return;
     await ensureLogin('ops');
-    if (!button('ops', 'Smoke at MRT Exit B')) return;
     await click('ops', () => button('ops', 'Ops'), 'ops queue');
+    // Already published (or nothing pending) — nothing to verify.
+    if (!button('ops', 'Smoke at MRT Exit B')) { smokeVerifiedRef.current = true; return; }
     await click('ops', () => button('ops', 'Smoke at MRT Exit B'), 'smoke report');
     await click('ops', () => button('ops', 'Verify → publish as incident'), 'verify report');
+    smokeVerifiedRef.current = true;
   };
 
   const ensureBroadcastSent = async () => {
@@ -1037,7 +1042,7 @@ export default function LiveDirector({ autostart, onExit }: { autostart: boolean
         return swarmMarkersRef.current <= 0 || markers < Math.min(swarmMarkersRef.current, 5);
       }
       case 'smokeVerified':
-        return !!button('ops', 'Smoke at MRT Exit B');
+        return !smokeVerifiedRef.current;
       case 'broadcastSent':
         return !broadcastDelivered();
       case 'responderOnScene':
@@ -1586,6 +1591,7 @@ export default function LiveDirector({ autostart, onExit }: { autostart: boolean
         await click('ops', () => button('ops', 'Ops'), 'ops queue');
         await click('ops', () => button('ops', 'Smoke at MRT Exit B'), 'smoke report');
         await click('ops', () => button('ops', 'Verify → publish as incident'), 'verify report');
+        smokeVerifiedRef.current = true;
         await switchCamera('ops', 'Ops · command the whole picture');
         await askAiKaki(
           'ops',
@@ -1704,6 +1710,7 @@ export default function LiveDirector({ autostart, onExit }: { autostart: boolean
     setError(null);
     stopRequestedRef.current = false;
     restartRequestedRef.current = false;
+    smokeVerifiedRef.current = false;
     skipTargetRef.current = null;
     sectionIndexRef.current = 0;
     setCurrentSectionIndex(0);

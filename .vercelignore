@@ -1,0 +1,7 @@
+# Vercel hosts the static frontend ONLY. The realtime bridge (MQTT/Redis) and the
+# AI (Ollama) run in the Docker stack — not on Vercel — so excluding these keeps
+# the deploy a clean frontend-only Vite build and avoids the serverless-function
+# limit. For the full app, run the Docker stack (./start.sh), not Vercel.
+api/
+backend/
+infra/
