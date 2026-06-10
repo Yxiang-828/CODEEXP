@@ -539,4 +539,6 @@ def cleanup_demo(session_id: str):
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run("bridge:app", host="0.0.0.0", port=PORT)
+    # Reuse this app object; importing "bridge:app" here starts a second MQTT
+    # mirror client because this file is already running as __main__.
+    uvicorn.run(app, host="0.0.0.0", port=PORT)

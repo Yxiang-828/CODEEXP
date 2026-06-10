@@ -45,13 +45,13 @@
       "id": "god-agents",
       "voice": "director",
       "speaker": "God Mode",
-      "narration": "Now I add disposable witness reports, rain pressure, and A I responder agents. They support the S O S; they are not the emergency trigger."
+      "narration": "Now I add disposable witness reports, rain pressure, and synthetic demo responders. They support the S O S presentation; they are not autonomous A I agents or the emergency trigger."
     },
     {
       "id": "resident-intro",
       "voice": "resident",
       "speaker": "Citizen, Mei Ling",
-      "narration": "It is pouring at the M R T exit. An e bike is smoking at the covered choke point and people are crowding under shelter. I am asthmatic, so first I make sure my aid card is set."
+      "narration": "In this drill, rain has crowded people under the covered M R T exit while an e bike smokes near the choke point. I am asthmatic, so first I make sure my aid card is set."
     },
     {
       "id": "responder-intro",
@@ -87,7 +87,7 @@
       "id": "bekal-intro",
       "voice": "director",
       "speaker": "AI Director",
-      "narration": "Bekal is the S O S companion A I. It does not dispatch anyone. It calls the A E D and hospital skills, then gives Mei Ling specific guidance while responders move."
+      "narration": "Bekal is the S O S companion A I. It does not dispatch anyone. It calls the A E D and hospital skills, then gives Mei Ling specific guidance while the response forms."
     },
     {
       "id": "propagation",
@@ -117,7 +117,7 @@
       "id": "resident-relief",
       "voice": "resident",
       "speaker": "Citizen, Mei Ling",
-      "narration": "This is the moment that matters. My map does not merely say help is coming. I can see responders moving toward me and an A E D runner assigned."
+      "narration": "This is the moment that matters. My map does not merely say help is coming. I can see nearby responder approach markers, while the full supporting roster remains in the case room."
     },
     {
       "id": "resilience-drop",
@@ -147,19 +147,19 @@
       "id": "ops-deploy-bot",
       "voice": "ops",
       "speaker": "Ops, Nadia",
-      "narration": "Now my job is coordination. Medical goes to the collapsed person, the A E D runner goes to the nearest device, and traffic access checks the road."
+      "narration": "Now my job is coordination. The medical S O S continues in its private case room, while I send a separate responder to investigate the blocked access road."
     },
     {
       "id": "ops-broadcast",
       "voice": "ops",
       "speaker": "Ops, Nadia",
-      "narration": "The smoke and access risk are verified, so I warn people away from the station exit without exposing the private case room."
+      "narration": "The smoke report is verified and blocked access remains an active reported risk, so I warn people away from the station exit without exposing the private case room."
     },
     {
       "id": "resident-safe",
       "voice": "resident",
       "speaker": "Citizen, Mei Ling",
-      "narration": "The alert tells everyone else what to avoid. In my case room I can see who is here; the A E D is with the elderly man, responders have him, and I am clear of the smoke. So I tap I'm safe."
+      "narration": "The alert tells everyone else what to avoid. In my case room I can see responder presence, and I am now clear of the smoke. So I tap I'm safe."
     },
     {
       "id": "responder-resolve",
@@ -279,7 +279,7 @@
       "id": "map-ops-camera",
       "voice": "director",
       "speaker": "AI Director",
-      "narration": "Nadia opens the nearest traffic camera to Exit B. The image is relevant to the incident access route, not a random island-wide camera."
+      "narration": "Nadia opens the nearest traffic camera to Exit B as potential access evidence, then judges whether its view is useful."
     },
     {
       "id": "map-ops-rain",
@@ -303,7 +303,7 @@
       "id": "pondok-result",
       "voice": "director",
       "speaker": "AI Director",
-      "narration": "Pondok has compared the live roster with the case: Aisha fits medical and hazard support, while Wei Jian fits the A E D run. Nadia still decides the deployment."
+      "narration": "Pondok has compared the live roster with the case and highlighted skill-fit candidates for medical and A E D support. Nadia still decides every deployment."
     },
     {
       "id": "ops-investigation-action",
@@ -315,7 +315,7 @@
       "id": "ops-broadcast-action",
       "voice": "director",
       "speaker": "AI Director",
-      "narration": "Nadia targets everyone near Exit B, marks the warning as Emergency, and writes one clear public action: keep the walkway and access road clear."
+      "narration": "Nadia sends the warning to citizens and responders, labels the area Exit B, marks it Emergency, and gives one clear public action: keep the walkway and access road clear."
     },
     {
       "id": "resident-alert-action",

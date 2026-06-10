@@ -4,6 +4,10 @@ A live, role-aware map of Singapore for citizens, responders, and ops.
 One map. Three views. Real OneMap basemap. Real NEA data. Shared truth
 store so an action by one role appears for the others in the same tick.
 
+For the complete Docker stack, backend, AI, and both demos, follow
+`START-HERE.md` and run `.\start.ps1` on Windows or `./start.sh` on Linux/macOS.
+The `build.*` and `run.*` scripts below are frontend-only developer helpers.
+
 See `../BLUEPRINT.md` in the parent folder for the full product blueprint
 including every data source we plan to wire (Tier A → D).
 
@@ -26,7 +30,7 @@ including every data source we plan to wire (Tier A → D).
 ## Prerequisites
 
 - **Docker** (recommended) — https://www.docker.com/products/docker-desktop
-- **Node.js 18+** (alternative) — https://nodejs.org
+- **Node.js 20+** (alternative, frontend-only) — https://nodejs.org
 - **Ollama** (optional, for AI features) — https://ollama.com
 
 ---
@@ -41,7 +45,8 @@ git clone https://github.com/kampung-kaki/CODEEXP.git
 cd CODEEXP
 
 # Run the full stack
-./start.sh
+./start.sh          # Linux / macOS
+.\start.ps1         # Windows (PowerShell)
 ```
 
 ### Commands
@@ -51,6 +56,8 @@ cd CODEEXP
 ./start.sh -d       # Run detached (background)
 ./start.sh down     # Stop all services
 ```
+
+Windows: `.\start.ps1`, `.\start.ps1 -d`, `.\start.ps1 down`.
 
 ### First Run
 
@@ -70,7 +77,7 @@ On first run, `start.sh` automatically:
 
 ---
 
-## Manual Setup (Node.js - Alternative)
+## Manual Setup (Node.js, frontend-only)
 
 ### Setup
 
@@ -81,22 +88,33 @@ cd CODEEXP
 
 # Install dependencies and build
 chmod +x build.sh run.sh
-./build.sh
+
+# Linux / macOS
+./build.sh --no-deploy
+
+# Windows
+build.bat --no-deploy
 ```
 
 ### Run
 
+After `build.sh --no-deploy`, two modes:
+
 ```bash
-./run.sh           # Build (if needed) + preview on http://localhost:5173
-./run.sh dev       # Vite dev server on http://localhost:3000 (hot reload)
-./run.sh share     # Build + preview + public Cloudflare tunnel
+./run.sh           # build (if needed) + preview on http://localhost:5173
+./run.sh dev       # vite dev server on http://localhost:3000 (hot reload)
 ```
+
+Windows: `run.bat`, `run.bat dev`.
+
+All commands kill anything already listening on `3000` / `4173` / `5173`
+before starting. The preview server binds to `0.0.0.0`, so anyone on
+your LAN can hit `http://<your-LAN-IP>:5173`.
 
 ### Access
 
 - **Preview**: http://localhost:5173
 - **Dev Server**: http://localhost:3000
-- **Public Share**: https://*.trycloudflare.com (via `./run.sh share`)
 
 ---
 
@@ -125,6 +143,23 @@ The stack runs four services via `infra/docker-compose.yml`:
 | redis | 6379 | Durable state mirror |
 | bridge | 8787 | FastAPI + MQTT for identity, presence, live demo |
 | web | 3000 | Vite server with React app, AI agents, gov-data proxies |
+
+---
+
+## What you'll see when it opens
+
+- A real Singapore basemap (OneMap grey tiles via MapLibre GL)
+- Top-left chip: `MAP · SG · CITIZEN` (changes with the role selector)
+- Map pins: events at Bedok / AYE / Tampines + live NEA PSI and
+  rainfall overlays refreshed every 60 s
+- Top-right of map (ops only): an 11-tool drawing toolbox
+- Bottom-centre: a tracking pill appears when there's a live SOS or
+  assignment
+
+Switch role from the top-left dropdown (`Citizen / Responder / Ops`).
+Each role gets a different left rail, dock, and workspace set. The
+shared store means a citizen `Report` immediately appears in the ops
+`Reports` queue and the responder `Verify` queue.
 
 ---
 
@@ -229,6 +264,7 @@ Example:
 docker exec -it kk-web /bin/sh
 ```
 
+---
 
 ## Troubleshooting
 
@@ -270,6 +306,15 @@ docker compose -f infra/docker-compose.yml logs -f
 # Specific service
 docker compose -f infra/docker-compose.yml logs -f bridge
 ```
+
+---
+
+## Where the original AI Studio template went
+
+The template's `GEMINI_API_KEY` and AI Studio metadata are not used in
+Section 2. The Host AI in the case lobby is a deterministic stub today
+(see `AppContext.askHost`). The Gemini wiring is planned for Section 5
+when the backend ships and we run Host inference server-side.
 
 ---
 

@@ -35,10 +35,16 @@ type CaptionKind = 'speech' | 'action';
 
 type DemoWindow = Window & {
   __kkDemo?: {
-    identity: () => { userId: string } | null;
+    identity: () => { userId: string; name: string; role: string } | null;
     topicCount: (prefix: string) => number;
     setTransportOnline: (online: boolean) => void;
     shutdown: () => void;
+  };
+  __kkAgent?: {
+    replyCount: (agent: string) => number;
+    lastReply: (agent: string) => string;
+    busy: () => boolean;
+    conditionsReady?: () => boolean;
   };
   __kkMapDemo?: {
     focusLocation: (near: { lng: number; lat: number }, zoom?: number) => void;
@@ -165,7 +171,9 @@ export default function LiveDirector({ autostart, onExit }: { autostart: boolean
   const runAfterPrepareRef = useRef(false);
   const autostartPreparedRef = useRef(false);
   const autostartRunRef = useRef(false);
-  const fast = useMemo(() => new URLSearchParams(window.location.search).get('pace') === 'fast', []);
+  const searchParams = useMemo(() => new URLSearchParams(window.location.search), []);
+  const fast = searchParams.get('pace') === 'fast';
+  const silent = searchParams.get('silent') === '1';
 
   const checkpoint = () => {
     if (stopRequestedRef.current) throw new DemoStopped();
@@ -346,6 +354,10 @@ export default function LiveDirector({ autostart, onExit }: { autostart: boolean
     setCaption(text);
     setCaptionKind('speech');
     if (fast) { await wait(180); return; }
+    if (silent) {
+      await wait(Math.min(9000, Math.max(2600, text.length * 48)));
+      return;
+    }
     let finished = false;
     let cancel = () => {};
     cancelSpeechRef.current = () => {
@@ -511,6 +523,96 @@ export default function LiveDirector({ autostart, onExit }: { autostart: boolean
     await ensureLayerOff(role, toggleLabel);
     await collapseLayerPanel(role);
     await wait(fast ? 40 : 220);
+  };
+
+  const actionBeat = (nextChapter: string, text: string) => {
+    setChapter(nextChapter);
+    setSpeaker('Director');
+    setCaption(text);
+    setCaptionKind('action');
+  };
+
+  // AI latency is presentation time, not dead time. These previews expose the
+  // exact map evidence already available to the agent without adding narration
+  // scenes that would need a matching voice asset.
+  const previewMapLayer = async (
+    role: RoleKey,
+    layerId: string,
+    toggleLabel: string,
+    spokenLabel: string,
+    detail: string,
+  ): Promise<boolean> => {
+    actionBeat(`${actors[role].roleLabel} · ${spokenLabel}`, detail);
+    frameWindow(role).__kkMapDemo?.focusLocation(INCIDENT_LOCATION, 14.2);
+    try {
+      await ensureLayerOn(role, toggleLabel);
+      await collapseLayerPanel(role);
+      await wait(fast ? 60 : 240);
+      let sample = frameWindow(role).__kkMapDemo?.showLayerSample(layerId, INCIDENT_LOCATION) ?? null;
+      if (!sample) {
+        await wait(fast ? 100 : 500);
+        sample = frameWindow(role).__kkMapDemo?.showLayerSample(layerId, INCIDENT_LOCATION) ?? null;
+      }
+      if (!sample) return false;
+      await moveCursorToFramePoint(role, sample);
+      const screenPoint = framePointToScreen(role, sample);
+      if (screenPoint) {
+        const id = ++focusBoxIdRef.current;
+        const w = 196;
+        const h = 118;
+        setFocusBox({
+          id,
+          x: Math.min(window.innerWidth - w - 14, Math.max(14, Math.round(screenPoint.x - w / 2))),
+          y: Math.min(window.innerHeight - h - 124, Math.max(40, Math.round(screenPoint.y - h * 0.82))),
+          w,
+          h,
+          label: `${spokenLabel}: ${sample.label}`,
+        });
+        await wait(fast ? 420 : 1500);
+        setFocusBox((current) => current?.id === id ? null : current);
+      }
+      return true;
+    } catch {
+      return false;
+    } finally {
+      frameWindow(role).__kkMapDemo?.clearEvidence();
+      try { await ensureLayerOff(role, toggleLabel); } catch { /* optional preview */ }
+      try { await collapseLayerPanel(role); } catch { /* optional preview */ }
+    }
+  };
+
+  const previewOpsContext = async () => {
+    if (!button('ops', 'Emergency access road blocked')) {
+      const opsToggle = button('ops', 'Ops', true);
+      if (opsToggle) await click('ops', () => opsToggle, 'open ops context');
+    }
+    const liveCase = button('ops', 'Medical · Mei Ling') ?? button('ops', 'Medical');
+    if (liveCase) {
+      actionBeat(
+        'Ops · Pondok checks the live case',
+        'Pondok starts with the active medical S O S, including its category, member count, and private-case boundary.',
+      );
+      await moveCursor('ops', liveCase);
+      await wait(fast ? 300 : 1350);
+    }
+    const accessReport = button('ops', 'Emergency access road blocked');
+    if (accessReport) {
+      actionBeat(
+        'Ops · Pondok checks supporting reports',
+        'The blocked-access report remains supporting context, separate from the medical casualty.',
+      );
+      await moveCursor('ops', accessReport);
+      await wait(fast ? 300 : 1350);
+    }
+    const verifiedSmoke = button('ops', 'Smoke at MRT Exit B');
+    if (verifiedSmoke) {
+      actionBeat(
+        'Ops · Pondok checks verified context',
+        'The verified smoke incident stays on the shared map while Pondok compares responder fit.',
+      );
+      await moveCursor('ops', verifiedSmoke);
+      await wait(fast ? 300 : 1350);
+    }
   };
 
   const spawnSwarm = async () => {
@@ -681,12 +783,6 @@ export default function LiveDirector({ autostart, onExit }: { autostart: boolean
     }
   };
 
-  const aiBubbleCount = (role: RoleKey) => Array.from(frameDocument(role).querySelectorAll('span'))
-    .filter((element) => {
-      const cls = String((element as HTMLElement).className);
-      return cls.includes('rounded-2xl') && cls.includes('px-3.5');
-    }).length;
-
   const askAiKaki = async (
     role: RoleKey,
     agentName: 'Pelita' | 'Bekal' | 'Pondok',
@@ -694,6 +790,7 @@ export default function LiveDirector({ autostart, onExit }: { autostart: boolean
     answerNeedle: string,
     resultSceneId: string,
     resultCaption: string,
+    whileWaiting: () => Promise<void>,
   ) => {
     setFocusBox(null);
     await click(role, () => button(role, 'AI Kaki'), `${role} AI Kaki`);
@@ -711,18 +808,36 @@ export default function LiveDirector({ autostart, onExit }: { autostart: boolean
     const aiInput = await waitFor(() => inputByPlaceholder(role, `Ask ${agentName}`), `${agentName} input`);
     const send = aiInput.parentElement?.querySelector('button') as HTMLButtonElement | null;
     if (!send) throw new Error(`${agentName} send button not found`);
-    const beforeCount = aiBubbleCount(role);
-    await click(role, () => send, `${agentName} send`);
-    await wait(fast ? 80 : 700);
+    const agentKey = agentName.toLowerCase();
     await waitFor(
-      () => {
-        const text = cleanText(frameDocument(role).body.textContent);
-        const answered = aiBubbleCount(role) >= beforeCount + 2;
-        return answered && !text.includes(`${agentName} is checking`) && new RegExp(answerNeedle, 'i').test(text) ? document.body : null;
-      },
-      `${agentName} answer`,
-      90000,
+      () => frameWindow(role).__kkAgent ?? null,
+      `${agentName} reply observer`,
     );
+    const beforeCount = frameWindow(role).__kkAgent?.replyCount(agentKey) ?? 0;
+    await click(role, () => send, `${agentName} send`);
+    const deadline = Date.now() + 90000;
+    const answered = () => {
+      const currentAgent = frameWindow(role).__kkAgent;
+      if (!currentAgent) return false;
+      const reply = currentAgent.lastReply(agentKey);
+      return currentAgent.replyCount(agentKey) > beforeCount
+        && !currentAgent.busy()
+        && new RegExp(answerNeedle, 'i').test(reply);
+    };
+    await wait(fast ? 80 : 500);
+    await closeAiKaki(role);
+    while (!answered() && Date.now() < deadline) await whileWaiting();
+    await waitFor(
+      () => answered() ? document.body : null,
+      `${agentName} answer`,
+      Math.max(1000, deadline - Date.now()),
+    );
+    if (!aiKakiOpen(role)) await click(role, () => button(role, 'AI Kaki'), `${role} reopen AI Kaki`);
+    await waitFor(
+      () => cleanText(aiHeader(role)?.textContent).includes(agentName) ? aiHeader(role) : null,
+      `${agentName} reply panel`,
+    );
+    setChapter(`${actors[role].roleLabel} · ${agentName} reply`);
     await narrate(resultSceneId, 'Director', resultCaption);
     await closeAiKaki(role);
   };
@@ -847,7 +962,7 @@ export default function LiveDirector({ autostart, onExit }: { autostart: boolean
       await narrate(
         'resident-intro',
         'Mei Ling',
-        'It is pouring at the M R T exit. An e bike is smoking at the covered choke point and people are crowding under shelter. I am asthmatic, so first I make sure my aid card is set.',
+        'In this drill, rain has crowded people under the covered M R T exit while an e bike smokes near the choke point. I am asthmatic, so first I make sure my aid card is set.',
       );
       await click('resident', () => frameDocument('resident').querySelector('button[title="Your profile"]'), 'resident profile');
       await fill('resident', () => inputByLabel('resident', 'Phone'), '9000 2810', 'resident phone');
@@ -889,6 +1004,11 @@ export default function LiveDirector({ autostart, onExit }: { autostart: boolean
         'rain|traffic|air|PSI|condition',
         'pelita-result',
         'Pelita has turned the cached rain, air, and traffic readings into one useful local answer. No extra upstream fetch was needed.',
+        async () => {
+          await previewMapLayer('resident', 'rainfall', 'Rainfall', 'rainfall evidence', 'Pelita is checking the cached rainfall reading already available on Mei Ling’s map.');
+          await previewMapLayer('resident', 'forecast2h', '2h forecast', 'forecast evidence', 'The two-hour forecast stays visible while Pelita builds the local conditions answer.');
+          await previewMapLayer('resident', 'incidents', 'Traffic incident', 'traffic evidence', 'The nearest traffic record gives the same access context Pelita receives from the shared snapshot.');
+        },
       );
       await flashEvidenceCard('PELITA · CONDITIONS', 'CACHE SNAPSHOT', 'Pelita reads the same live conditions snapshot already powering the map.');
 
@@ -918,7 +1038,7 @@ export default function LiveDirector({ autostart, onExit }: { autostart: boolean
       await narrate(
         'bekal-intro',
         'Director',
-        'Bekal is the S O S companion A I. It does not dispatch anyone. It calls the A E D and hospital skills, then gives Mei Ling specific guidance while responders move.',
+        'Bekal is the S O S companion A I. It does not dispatch anyone. It calls the A E D and hospital skills, then gives Mei Ling specific guidance while the response forms.',
       );
       await askAiKaki(
         'resident',
@@ -927,6 +1047,11 @@ export default function LiveDirector({ autostart, onExit }: { autostart: boolean
         'AED|hospital|A&E|CPR|995',
         'bekal-result',
         'Bekal has returned the nearest A E D, an emergency hospital, and immediate safety guidance. Those skill results are also rendered as map pins.',
+        async () => {
+          await previewMapLayer('resident', 'aeds', 'AED', 'nearest AED', 'While Bekal checks, the map exposes the nearest bundled A E D around the S O S.');
+          await previewMapLayer('resident', 'hospitals', 'Hospital', 'emergency hospital', 'The emergency-hospital layer gives Bekal a concrete escalation point without another upstream fetch.');
+          await previewMapLayer('resident', 'incidents', 'Traffic incident', 'access context', 'The access layer remains useful while the medical guidance is being assembled.');
+        },
       );
       await flashEvidenceCard('BEKAL · AED + HOSPITAL SKILLS', 'MAP PINS GENERATED', 'Bekal calls the AED and hospital skills on bundled data — no upstream API — then the app renders those directives as real pins.');
       await waitFor(() => button('responder', 'Someone nearby needs help'), 'responder page');
@@ -935,7 +1060,7 @@ export default function LiveDirector({ autostart, onExit }: { autostart: boolean
       await narrate(
         'god-agents',
         'Director',
-        'Now I add disposable witness reports, rain pressure, and A I responder agents. They support the S O S; they are not the emergency trigger.',
+        'Now I add disposable witness reports, rain pressure, and synthetic demo responders. They support the S O S presentation; they are not autonomous A I agents or the emergency trigger.',
       );
 
       await switchCamera('all', 'MQTT · one truth in three clients');
@@ -982,11 +1107,12 @@ export default function LiveDirector({ autostart, onExit }: { autostart: boolean
       await click('responder', () => button('responder', 'Join & help'), 'join SOS');
       const swarm = await spawnSwarm();
       if (!swarm.responders) throw new Error('God Mode swarm did not attach responders to the SOS');
+      const renderedSwarmMarkers = Math.min(swarm.responders, 5);
       await flashPresentationCard(
-        'GOD MODE RESPONDERS',
-        `${swarm.responders} BOT USERS`,
+        'SYNTHETIC DEMO RESPONDERS',
+        `${swarm.responders} FIXTURE USERS`,
         'LIVE APPROACH MARKERS',
-        'AED runner · medical lead · crowd guide · fire watch · traffic access',
+        `Nearest ${renderedSwarmMarkers} shown on the map; the full roster stays in the case room.`,
       );
       await fill('responder', () => inputByPlaceholder('responder', 'Message the case'), 'Mei Ling — on my way from the north exit, about ninety seconds. Your aid card shows asthma, so keep your inhaler close in this smoke. If the elderly man is not breathing normally, start CPR and send someone safe toward the marked AED.', 'case chat');
       const chatInput = await waitFor(() => inputByPlaceholder('responder', 'Message the case'), 'case chat input');
@@ -995,7 +1121,7 @@ export default function LiveDirector({ autostart, onExit }: { autostart: boolean
 
       await switchCamera('resident', 'Citizen · help becomes visible');
       await waitFor(
-        () => (frameWindow('resident').__kkMapDemo?.responderMarkerCount() ?? 0) >= swarm.responders
+        () => (frameWindow('resident').__kkMapDemo?.responderMarkerCount() ?? 0) >= renderedSwarmMarkers
           ? document.body
           : null,
         'resident swarm markers',
@@ -1009,7 +1135,7 @@ export default function LiveDirector({ autostart, onExit }: { autostart: boolean
       await narrate(
         'resident-relief',
         'Mei Ling',
-        'This is the moment that matters. My map does not merely say help is coming. I can see responders moving toward me and an A E D runner assigned.',
+        'This is the moment that matters. My map does not merely say help is coming. I can see nearby responder approach markers, while the full supporting roster remains in the case room.',
       );
       await wait(fast ? 120 : 300);
 
@@ -1038,7 +1164,7 @@ export default function LiveDirector({ autostart, onExit }: { autostart: boolean
         'cameras',
         'Traffic camera',
         'nearest traffic camera',
-        'Nadia opens the nearest traffic camera to Exit B. The image is relevant to the incident access route, not a random island-wide camera.',
+        'Nadia opens the nearest traffic camera to Exit B as potential access evidence, then judges whether its view is useful.',
       );
       await inspectMapLayer(
         'ops',
@@ -1080,13 +1206,15 @@ export default function LiveDirector({ autostart, onExit }: { autostart: boolean
         'Ops picture for Exit B: active medical SOS for collapsed elderly casualty, supporting smoke and access reports, on-duty responders. Which responder fits AED support and what facts should I verify before broadcast?',
         'Aisha|Wei Jian|AED|medical|responder|SOS',
         'pondok-result',
-        'Pondok has compared the live roster with the case: Aisha fits medical and hazard support, while Wei Jian fits the A E D run. Nadia still decides the deployment.',
+        'Pondok has compared the live roster with the case and highlighted skill-fit candidates for medical and A E D support. Nadia still decides every deployment.',
+        previewOpsContext,
       );
       await flashEvidenceCard('PONDOK · ROSTER + FIT', 'INFORMS, NEVER ORDERS', 'Pondok reads the on-duty roster, cases and reports from the CSOT snapshot. It gives skill fit and defers the send decision to the operator.');
+      setChapter('Ops · coordination and dispatch');
       await narrate(
         'ops-deploy-bot',
         'Nadia',
-        'Now my job is coordination. Medical goes to the collapsed person, the A E D runner goes to the nearest device, and traffic access checks the road.',
+        'Now my job is coordination. The medical S O S continues in its private case room, while I send a separate responder to investigate the blocked access road.',
       );
       await narrate(
         'ops-investigation-action',
@@ -1098,20 +1226,21 @@ export default function LiveDirector({ autostart, onExit }: { autostart: boolean
       await click('ops', () => button('ops', 'Send', true), 'send investigation');
       await flashPresentationCard(
         'DISPATCH CREATED',
-        'MEDICAL · SEARCH · AED',
-        'TRAFFIC ACCESS CHECK',
+        'MEDICAL SOS CONTINUES',
+        'ACCESS CHECK DISPATCHED',
         'The medical case and road-access investigation remain separate, but share the same live map.',
       );
 
+      setChapter('Ops · public warning');
       await narrate(
         'ops-broadcast',
         'Nadia',
-        'The smoke and access risk are verified, so I warn people away from the station exit without exposing the private case room.',
+        'The smoke report is verified and blocked access remains an active reported risk, so I warn people away from the station exit without exposing the private case room.',
       );
       await narrate(
         'ops-broadcast-action',
         'Director',
-        'Nadia targets everyone near Exit B, marks the warning as Emergency, and writes one clear public action: keep the walkway and access road clear.',
+        'Nadia sends the warning to citizens and responders, labels the area Exit B, marks it Emergency, and gives one clear public action: keep the walkway and access road clear.',
       );
       await click('ops', () => button('ops', 'Broadcast', true), 'broadcast action');
       await click('ops', () => button('ops', 'Everyone', true), 'broadcast audience');
@@ -1173,7 +1302,7 @@ export default function LiveDirector({ autostart, onExit }: { autostart: boolean
       await narrate(
         'resident-safe',
         'Mei Ling',
-        "The alert tells everyone else what to avoid. In my case room I can see who is here; the A E D is with the elderly man, responders have him, and I am clear of the smoke. So I tap I'm safe.",
+        "The alert tells everyone else what to avoid. In my case room I can see responder presence, and I am now clear of the smoke. So I tap I'm safe.",
       );
       await closeSheet('resident', 'Alerts');
       await click('resident', () => button('resident', "I'm safe", true), 'citizen safe acknowledgement');
@@ -1377,12 +1506,12 @@ export default function LiveDirector({ autostart, onExit }: { autostart: boolean
       >
         <div className="flex h-6 items-center gap-4 overflow-hidden border-b border-black/20 px-4 text-[8px] font-black uppercase tracking-[0.12em] text-black/60">
           <span className="shrink-0 text-red-700">Live demo</span>
-          <span className="truncate">Qwen custom voices + deterministic live UI actions</span>
+          <span className="truncate">{silent ? 'Silent caption review + deterministic live UI actions' : 'Qwen custom voices + deterministic live UI actions'}</span>
           <span className="shrink-0">{sessionId ?? 'session not started'}</span>
           <span className="shrink-0">{status?.retainedObjects ?? 0} session objects</span>
           <span className="ml-auto flex shrink-0 items-center gap-1.5">
-            <span className={`h-1.5 w-1.5 rounded-full ${voiceReady ? 'bg-emerald-600' : 'bg-amber-500'}`} />
-            Qwen voice {voiceReady ? 'ready' : 'checking'}
+            <span className={`h-1.5 w-1.5 rounded-full ${silent ? 'bg-black/35' : voiceReady ? 'bg-emerald-600' : 'bg-amber-500'}`} />
+            {silent ? 'Voice muted' : `Qwen voice ${voiceReady ? 'ready' : 'checking'}`}
           </span>
           <span className="flex shrink-0 items-center gap-1.5">
             <span className={`h-1.5 w-1.5 rounded-full ${networkState === 'online' ? 'bg-emerald-600' : 'animate-pulse bg-red-600'}`} />

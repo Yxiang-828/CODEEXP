@@ -393,10 +393,10 @@ export default function QuickShowcaseDirector({ autostart, onExit }: { autostart
     hardCapMs: number,
   ): Promise<boolean> => {
     const answered = () => agentReplyCount(role, agentName) > before;
-    const started = Date.now();
     for (const filler of fillers) {
       try { await filler(); } catch { /* a filler hiccup must not abort the wait */ }
     }
+    const started = Date.now();
     while (!answered() && Date.now() - started < hardCapMs) {
       checkpoint();
       await rawSleep(fast ? 120 : 350);
@@ -493,31 +493,6 @@ export default function QuickShowcaseDirector({ autostart, onExit }: { autostart
     await waitFor(() => identityReady(role, actor), `${role} identity minted`, 30000);
     await waitFor(() => profileButton(role), `${role} map ready`, 30000);
     if (opts?.paced) await holdWait(fast ? 80 : 360);
-  };
-
-  const login = async (role: RoleKey, opts?: LoginOpts) => {
-    const actor = actors[role];
-    const appRole = appRoleFor(role);
-    if (!opts?.quiet) await switchCamera(role, `${actor.roleLabel} sign-in`, '00:00');
-
-    if (identityReady(role, actor) && profileButton(role)) return;
-
-    const quickJoin = !opts?.ui ? frameWindow(role).__kkDemo?.quickJoin : undefined;
-    if (quickJoin) {
-      await waitFor(
-        () => (frameWindow(role).__kkDemo?.quickJoinReady?.() ? true : null),
-        `${role} demo client ready`,
-        15000,
-      );
-      quickJoin(actor.name, appRole);
-      await waitFor(() => identityReady(role, actor), `${role} identity minted`, 30000);
-      await waitFor(() => profileButton(role), `${role} map ready`, 30000);
-      return;
-    }
-
-    await loginOpenPicker(role, opts);
-    await loginFillName(role, opts);
-    await loginPickRole(role, opts);
   };
 
   const setupOpts = { ui: true, quiet: true, paced: true } as const;
@@ -702,15 +677,16 @@ export default function QuickShowcaseDirector({ autostart, onExit }: { autostart
       let pelitaBefore = 0;
       await narrateWith('qs-pelita', 'Mei Ling', 'Before anything escalates, I ask Pelita, our conditions agent, how my area is looking near the M R T exit.', async () => {
         pelitaBefore = await startAsk('resident', 'Pelita', PELITA_PROMPT);
+        await closeAiKaki('resident');
       });
-      await closeAiKaki('resident');
-      await waitForAgentReply('resident', 'Pelita', pelitaBefore, [
+      const pelitaAnswered = await waitForAgentReply('resident', 'Pelita', pelitaBefore, [
         () => narrateWith('qs-conditions', 'Director', 'While Pelita thinks, the app pulls live readings from N E A and L T A, so rainfall and traffic light up right around Exit B.', async () => {
           await inspectLayer('resident', 'rainfall', 'Rainfall', 'Rainfall · NEA', 1200);
           await inspectLayer('resident', 'incidents', 'Traffic incident', 'Traffic · LTA', 1200);
         }),
         () => inspectLayer('resident', 'forecast2h', '2h forecast', '2h forecast · NEA', 1200),
       ], fast ? 8000 : 48000);
+      if (!pelitaAnswered) throw new Error('Pelita did not answer before the demo timeout');
       await click('resident', () => button('resident', 'AI Kaki'), 'reopen AI Kaki');
       await wait(fast ? 120 : 400);
       await narrateWith('qs-pelita-reply', 'Director', 'Pelita turns those cached rain and traffic readings into one clear local answer, with no extra fetch needed.', () => holdWait(fast ? 400 : 900));
@@ -741,13 +717,14 @@ export default function QuickShowcaseDirector({ autostart, onExit }: { autostart
       frameWindow('resident').__kkDemoBekalFast = true;
       const bekalBefore = await startAsk('resident', 'Bekal', BEKAL_DEMO_PROMPT);
       await closeAiKaki('resident');
-      await waitForAgentReply('resident', 'Bekal', bekalBefore, [
+      const bekalAnswered = await waitForAgentReply('resident', 'Bekal', bekalBefore, [
         () => narrateWith('qs-bekal', 'Director', 'Mei Ling asks Bekal which A E D and hospital to use, while the map confirms the nearest ones around the incident.', async () => {
           await inspectLayer('resident', 'aeds', 'AED', 'Nearest AED', 1200);
           await inspectLayer('resident', 'hospitals', 'Hospital', 'A&E hospital', 1200);
         }),
         () => inspectLayer('resident', 'incidents', 'Traffic incident', 'Route traffic · LTA', 1200),
       ], fast ? 6000 : 20000);
+      if (!bekalAnswered) throw new Error('Bekal did not answer before the demo timeout');
       await click('resident', () => button('resident', 'AI Kaki'), 'reopen AI Kaki');
       await wait(fast ? 120 : 400);
       await narrateWith('qs-bekal-reply', 'Director', 'Bekal returns the nearest A E D, an emergency hospital, and first-aid guidance, dropped onto the map as real pins.', () => holdWait(fast ? 400 : 1000));
