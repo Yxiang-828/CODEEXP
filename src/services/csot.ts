@@ -353,6 +353,60 @@ export function demoQuickJoinReady() {
   return demoQuickJoinImpl !== null;
 }
 
+function demoResidentProfileReady(): boolean {
+  const id = csot.identity?.userId;
+  if (!id) return false;
+  const user = csot.get<{ phone?: string }>('network', 'user', id);
+  const card = csot.get<{ allergies?: string; conditions?: string[]; carries?: string[] }>('network', 'aidcard', id);
+  return (
+    (user?.phone ?? '').replace(/\s/g, '').includes('90002810')
+    && (card?.allergies ?? '').toLowerCase().includes('no known')
+    && (card?.conditions ?? []).includes('Asthma')
+    && (card?.carries ?? []).includes('Inhaler')
+  );
+}
+
+function demoResponderProfileReady(): boolean {
+  const id = csot.identity?.userId;
+  if (!id) return false;
+  const responder = csot.collection<{ id: string; proficiencies?: string[] }>('operations', 'responder')
+    .find((r) => r.id === id);
+  const profs = responder?.proficiencies ?? [];
+  return profs.includes('medical') && profs.includes('hazard');
+}
+
+function demoConfigureResidentProfile(): void {
+  const id = csot.identity?.userId;
+  if (!id) return;
+  const user = csot.get<{ displayName?: string; phone?: string; address?: string }>('network', 'user', id);
+  if (user) {
+    csot.put('network', 'user', id, { ...user, phone: '9000 2810' });
+  }
+  const cur = csot.get<Record<string, unknown>>('network', 'aidcard', id);
+  csot.put('network', 'aidcard', id, {
+    allergies: 'No known drug allergies',
+    conditions: ['Asthma'],
+    carries: ['Inhaler'],
+    access: [],
+    language: 'English',
+    nokName: '',
+    nokPhone: '',
+    nokRelation: '',
+    ...cur,
+    userId: id,
+    updatedAt: Date.now(),
+  });
+}
+
+function demoConfigureResponderProfile(): void {
+  const id = csot.identity?.userId;
+  if (!id) return;
+  const cur = csot.collection<{ id: string; proficiencies?: string[] }>('operations', 'responder')
+    .find((r) => r.id === id);
+  if (!cur) return;
+  csot.put('operations', 'responder', id, { ...cur, proficiencies: ['medical', 'hazard'] });
+}
+
 declare global {
   interface Window {
     __kkDemo?: {
@@ -363,6 +417,10 @@ declare global {
       /** Embedded showcase: sign in without puppeting the Join UI. */
       quickJoin?: (name: string, role: string) => void;
       quickJoinReady?: () => boolean;
+      residentProfileReady?: () => boolean;
+      responderProfileReady?: () => boolean;
+      configureResidentProfile?: () => void;
+      configureResponderProfile?: () => void;
     };
   }
 }
@@ -378,5 +436,9 @@ if (typeof window !== 'undefined' && DEMO_SESSION_ID) {
       demoQuickJoinImpl(name, role);
     },
     quickJoinReady: () => demoQuickJoinReady(),
+    residentProfileReady: () => demoResidentProfileReady(),
+    responderProfileReady: () => demoResponderProfileReady(),
+    configureResidentProfile: () => demoConfigureResidentProfile(),
+    configureResponderProfile: () => demoConfigureResponderProfile(),
   };
 }

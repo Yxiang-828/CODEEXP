@@ -18,11 +18,14 @@ import {
 } from 'react';
 import { fetchLiveSnapshot, type LiveSnapshot } from './services/live';
 import {
+  buildHostMapFocusFromAed,
+  buildHostMapFocusFromHospital,
   formatHostAedReply,
   formatHostHospitalReply,
   formatHostPsiReply,
   queryHostTools,
 } from './services/hostTools';
+import { hostMapFocus } from './state/hostMapFocus';
 import { csot, registerDemoQuickJoin } from './services/csot';
 import { useCsotVersion } from './hooks/useCsot';
 import { getDistanceKm, etaMinutes } from './utils/geo';
@@ -1281,10 +1284,17 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       csot.removeTopic(pendingTopic);
       const formatted =
         resolution.tools.includes('nearestAed')
-          ? formatHostAedReply(result, origin)
+          ? formatHostAedReply(result)
           : resolution.tools.includes('nearestHospital')
-            ? formatHostHospitalReply(result, !!resolution.wantsLoadNote, origin)
+            ? formatHostHospitalReply(result, !!resolution.wantsLoadNote)
             : formatHostPsiReply(result);
+      if (resolution.tools.includes('nearestAed')) {
+        const focus = buildHostMapFocusFromAed(result, origin);
+        if (focus) hostMapFocus.set(focus);
+      } else if (resolution.tools.includes('nearestHospital')) {
+        const focus = buildHostMapFocusFromHospital(result, origin);
+        if (focus) hostMapFocus.set(focus);
+      }
       publishHostReply(formatted.text, formatted.chips);
     } catch {
       csot.removeTopic(pendingTopic);
@@ -1293,6 +1303,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   };
 
   function teardownCaseRoom(sosId: string) {
+    hostMapFocus.clear();
     for (const m of csot.collectionByPrefix<CaseMember>(`csot/case/${sosId}/member/`)) {
       csot.removeTopic(`csot/case/${sosId}/member/${m.id}`);
     }
@@ -1527,12 +1538,22 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
 
     const run = async () => {
       if (q.includes('aed') || (q.includes('nearest') && !q.includes('hospital'))) {
-        const formatted = formatHostAedReply(await queryHostTools(['nearestAed'], origin));
+        const result = await queryHostTools(['nearestAed'], origin);
+        const formatted = formatHostAedReply(result);
+        if (origin) {
+          const focus = buildHostMapFocusFromAed(result, origin);
+          if (focus) hostMapFocus.set(focus);
+        }
         publish(formatted.text, formatted.chips);
         return;
       }
       if (q.includes('hospital')) {
-        const formatted = formatHostHospitalReply(await queryHostTools(['nearestHospital'], origin), q.includes('load'));
+        const result = await queryHostTools(['nearestHospital'], origin);
+        const formatted = formatHostHospitalReply(result, q.includes('load'));
+        if (origin) {
+          const focus = buildHostMapFocusFromHospital(result, origin);
+          if (focus) hostMapFocus.set(focus);
+        }
         publish(formatted.text, formatted.chips);
         return;
       }

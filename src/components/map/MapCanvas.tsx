@@ -15,6 +15,8 @@ import { useAppContext } from '../../AppContext';
 import { getDistanceKm } from '../../utils/geo';
 import { mapPick } from '../../state/mapPick';
 import { bekalDirectives } from '../../state/bekalDirectives';
+import { hostMapFocus } from '../../state/hostMapFocus';
+import { formatDistance } from '../../services/hostTools';
 import { conditionsStore } from '../../state/conditionsStore';
 
 // Declared incidents/notices and SOS cases must SHOW what they are on the map —
@@ -171,6 +173,23 @@ function nearestFeature(fc: GeoJSON.FeatureCollection | undefined, near: { lng: 
   return best?.feature ?? null;
 }
 
+function featureForHostPin(
+  fc: GeoJSON.FeatureCollection | undefined,
+  pin: { lng: number; lat: number; label: string },
+  maxKm = 0.08,
+): GeoJSON.Feature {
+  const match = nearestFeature(fc, pin);
+  if (match) {
+    const at = featureCenter(match);
+    if (at && getDistanceKm({ lng: at[0], lat: at[1] }, pin) <= maxKm) return match;
+  }
+  return {
+    type: 'Feature',
+    geometry: { type: 'Point', coordinates: [pin.lng, pin.lat] },
+    properties: { name: pin.label },
+  };
+}
+
 function staticPopup(id: string, props: Record<string, unknown>): string {
   const title = (props.name as string) || (id === 'hospitals' ? 'Hospital' : 'AED');
   const sub = id === 'hospitals' ? 'Hospital · A&E' : `Public AED${props.hours ? ' · ' + props.hours : ''}`;
@@ -213,9 +232,12 @@ export default function MapCanvas() {
   const memberMarkers = useRef<maplibregl.Marker[]>([]);
   const noticeMarkers = useRef<maplibregl.Marker[]>([]);
   const bekalMarkers = useRef<maplibregl.Marker[]>([]);
+  const hostMarkers = useRef<maplibregl.Marker[]>([]);
   const selfMarker = useRef<maplibregl.Marker | null>(null);
   const demoPopupRef = useRef<maplibregl.Popup | null>(null);
+  const hostPopupRef = useRef<maplibregl.Popup | null>(null);
   const demoSourceRef = useRef<{ layerId: string; data: GeoJSON.FeatureCollection } | null>(null);
+  const hostSourceRef = useRef<{ layerId: string; data: GeoJSON.FeatureCollection } | null>(null);
 
   // SOS overlay: civilian sees only their own, responder/ops see all active.
   const { role, selfResponderId, sosSessions, setViewSosId, setSelfLocation, selfLocation, caseMembers, joinedCaseIds, events } = useAppContext();
@@ -407,7 +429,9 @@ export default function MapCanvas() {
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady) return;
+    const hostActive = hostMapFocus.get();
     for (const [id, fc] of Object.entries(staticData) as [string, GeoJSON.FeatureCollection][]) {
+      if (hostActive?.layerId === id) continue;
       (map.getSource(`live-${id}`) as GeoJSONSource | undefined)?.setData(fc);
       const renderId = `${id}-icon`;
       if (!wiredLive.current.has(renderId) && map.getLayer(renderId)) {
@@ -677,6 +701,91 @@ export default function MapCanvas() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bekalSig, mapReady]);
+
+  // Host /host nearest aed|hospital — turn on layer, isolate the 3 picks, fly
+  // to case + pins, and label ranked markers so chat never dumps raw coords.
+  const hostFocusSig = useSyncExternalStore(hostMapFocus.subscribe, hostMapFocus.snapshot, hostMapFocus.snapshot);
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady) return;
+
+    const restoreHostSource = () => {
+      const active = hostSourceRef.current;
+      if (!active) return;
+      (map.getSource(`live-${active.layerId}`) as GeoJSONSource | undefined)?.setData(active.data);
+      hostSourceRef.current = null;
+    };
+
+    const clearHostUi = () => {
+      restoreHostSource();
+      hostPopupRef.current?.remove();
+      hostPopupRef.current = null;
+      for (const m of hostMarkers.current) m.remove();
+      hostMarkers.current = [];
+    };
+
+    const req = hostMapFocus.get();
+    if (!req) {
+      clearHostUi();
+      return;
+    }
+
+    const fc = staticData[req.layerId];
+    if (!fc) return;
+
+    clearHostUi();
+
+    const features = req.pins.map((pin) => featureForHostPin(fc, pin));
+    hostSourceRef.current = { layerId: req.layerId, data: fc };
+    (map.getSource(`live-${req.layerId}`) as GeoJSONSource | undefined)?.setData({
+      type: 'FeatureCollection',
+      features,
+    });
+
+    setVisible((v) => ({ ...v, [req.layerId]: true }));
+
+    const bounds = new maplibregl.LngLatBounds();
+    bounds.extend([req.origin.lng, req.origin.lat]);
+    for (const pin of req.pins) bounds.extend([pin.lng, pin.lat]);
+    map.fitBounds(bounds, { padding: 90, maxZoom: req.layerId === 'aeds' ? 16.2 : 15.8, duration: 600 });
+
+    const best = req.pins.find((p) => p.best) ?? req.pins[0];
+    if (best) {
+      const bestFeature = features[req.pins.indexOf(best)] ?? features[0];
+      const at = featureCenter(bestFeature) ?? [best.lng, best.lat];
+      const props = (bestFeature.properties ?? {}) as Record<string, unknown>;
+      hostPopupRef.current = new maplibregl.Popup({ closeButton: true, maxWidth: '260px' })
+        .setLngLat(at as [number, number])
+        .setHTML(staticPopup(req.layerId, { ...props, name: (props.name as string) || best.label }))
+        .addTo(map);
+    }
+
+    const caseEl = document.createElement('div');
+    caseEl.style.cssText = 'display:flex;flex-direction:column;align-items:center;pointer-events:none';
+    caseEl.innerHTML =
+      '<span style="font-size:10px;font-weight:700;color:#0b1220;background:rgba(255,255,255,.94);border-radius:4px;padding:1px 5px;white-space:nowrap;box-shadow:0 1px 2px rgba(0,0,0,.2)">Case</span>' +
+      '<span style="margin-top:2px;display:flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:9999px;background:#2563EB;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.5);font-size:11px;line-height:1">📍</span>';
+    hostMarkers.current.push(
+      new maplibregl.Marker({ element: caseEl, anchor: 'bottom' }).setLngLat([req.origin.lng, req.origin.lat]).addTo(map),
+    );
+
+    for (const [i, pin] of req.pins.entries()) {
+      const isHosp = pin.kind === 'hospital';
+      const color = isHosp ? '#DC2626' : '#16A34A';
+      const glyph = isHosp ? '➕' : '⚡';
+      const sz = pin.best ? 26 : 22;
+      const label = `${i + 1}. ${pin.label} · ${formatDistance(pin.km)}`;
+      const el = document.createElement('div');
+      el.style.cssText = 'display:flex;flex-direction:column;align-items:center;pointer-events:none';
+      el.innerHTML =
+        `<span style="font-size:10px;font-weight:700;color:#0b1220;background:rgba(255,255,255,.94);border-radius:4px;padding:1px 5px;white-space:nowrap;box-shadow:0 1px 2px rgba(0,0,0,.2)">${escapeHtml(label)}${pin.best ? ' ★' : ''}</span>` +
+        `<span style="margin-top:2px;display:flex;align-items:center;justify-content:center;width:${sz}px;height:${sz}px;border-radius:9999px;background:${color};border:${pin.best ? 3 : 2}px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.5);font-size:12px;line-height:1">${glyph}</span>`;
+      hostMarkers.current.push(new maplibregl.Marker({ element: el, anchor: 'bottom' }).setLngLat([pin.lng, pin.lat]).addTo(map));
+    }
+
+    return () => { clearHostUi(); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hostFocusSig, mapReady, staticData]);
 
   // Click-to-place: when a requester (ops Declare) is asking for a point, the
   // NEXT map click resolves it — so a declaration lands WHERE OPS CLICKS, not at

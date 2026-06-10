@@ -89,14 +89,21 @@
       "scene": "responder-join",
       "voice": "responder",
       "reference": "2_amateur",
-      "file": "/home/dinosaur/Project/KampungKaki/CODEEXP/public/demo/voice/responder-join.wav",
+      "file": "/demo/voice/responder-join.wav",
       "durationSeconds": 7.92
+    },
+    {
+      "scene": "responder-aidcard",
+      "voice": "responder",
+      "reference": "2_amateur",
+      "file": "/demo/voice/responder-aidcard.wav",
+      "durationSeconds": 6.24
     },
     {
       "scene": "responder-host",
       "voice": "responder",
       "reference": "2_amateur",
-      "file": "public/demo/voice/responder-host.wav",
+      "file": "/demo/voice/responder-host.wav",
       "durationSeconds": 6.88
     },
     {
@@ -350,6 +357,20 @@
       "reference": "7_juilliard",
       "file": "/home/dinosaur/Project/KampungKaki/CODEEXP/public/demo/voice/resident-alert-action.wav",
       "durationSeconds": 5.84
+    },
+    {
+      "scene": "map-pelita-rain",
+      "voice": "director",
+      "reference": "7_juilliard",
+      "file": "/demo/voice/map-pelita-rain.wav",
+      "durationSeconds": 5.5
+    },
+    {
+      "scene": "map-bekal-aed",
+      "voice": "director",
+      "reference": "7_juilliard",
+      "file": "/demo/voice/map-bekal-aed.wav",
+      "durationSeconds": 6.5
     }
   ]
 }

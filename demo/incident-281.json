@@ -334,6 +334,18 @@
       "voice": "director",
       "speaker": "AI Director",
       "narration": "The ops warning has reached Mei Ling. The demo opens her alerts to show the delivered result before closing the case."
+    },
+    {
+      "id": "map-pelita-rain",
+      "voice": "director",
+      "speaker": "AI Director",
+      "narration": "Pelita is checking the cached rainfall reading already available on Mei Ling's map."
+    },
+    {
+      "id": "map-bekal-aed",
+      "voice": "director",
+      "speaker": "AI Director",
+      "narration": "While Bekal checks, the map exposes the nearest bundled A E D around the S O S."
     }
   ]
 }

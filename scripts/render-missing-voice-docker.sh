@@ -9,8 +9,6 @@ render() {
   local id="$1"
   local text="$2"
   local seed="$3"
-  local tmp="/tmp/${id}.txt"
-  printf '%s\n' "$text" > "$tmp"
   echo "[render] $id (seed $seed)"
   LD_LIBRARY_PATH="$QWEN/build:${LD_LIBRARY_PATH:-}" \
     "$QWEN/build/qwen-tts" \
@@ -20,16 +18,9 @@ render() {
     --ref-wav "$REF_WAV" \
     --ref-text "$REF_TXT" \
     --seed "$seed" \
-    -o "$OUT/${id}.wav" < "$tmp"
-  rm -f "$tmp"
+    -o "$OUT/${id}.wav" <<< "$text"
 }
 
-render "responder-aidcard" \
-  "There — Mei Ling's aid card: asthma, inhaler, no drug allergies. That only appeared because I joined the private case room." \
-  296
-
-render "responder-host" \
-  "Every case room has Host — slash commands, not another chat bot. I type slash host status; the whole room gets the same structured readout from live case data." \
-  294
-
+render "responder-aidcard" "There â€” Mei Ling's aid card: asthma, inhaler, no drug allergies. That only appeared because I joined the private case room." 296
+render "responder-host" "Every case room has Host â€” slash commands, not another chat bot. I type slash host status; the whole room gets the same structured readout from live case data." 294
 echo "[render] done"

@@ -1,32 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Check, MousePointer2, Pause, Play, Radio, RotateCcw, ShieldCheck, Sparkles, Square, UserRound } from 'lucide-react';
-import { pauseDemoAudio, playQwenScene, resumeDemoAudio, stopQwenScene, unlockDemoAudio } from './demoAudio';
+import { Check, ChevronLeft, ChevronRight, MousePointer2, Pause, Play, Radio, RotateCcw, ShieldCheck, SkipForward, Sparkles, Square, UserRound } from 'lucide-react';
+import { missingQwenScenes, pauseDemoAudio, playQwenScene, resumeDemoAudio, stopQwenScene, unlockDemoAudio } from './demoAudio';
 
-// LiveDirector — the canonical live demo stage.
-// Differences: real role labels (Citizen/Responder/Ops), coherent story (Mei
-// Ling is the witness, the elderly man is the casualty), no voice/persona meta
-// cards, AI agents have NO human avatar (they are the app's voice), specific AI
-// questions, and Qwen scene WAV playback with browser TTS fallback.
-
-// Browser speech synthesis — speak the caption so audio always matches the text.
-let _voices: SpeechSynthesisVoice[] = [];
-if (typeof window !== 'undefined' && window.speechSynthesis) {
-  const load = () => { _voices = window.speechSynthesis.getVoices(); };
-  load();
-  window.speechSynthesis.onvoiceschanged = load;
-}
-function speakLine(text: string, onDone: () => void): () => void {
-  if (typeof window === 'undefined' || !window.speechSynthesis) { onDone(); return () => {}; }
-  window.speechSynthesis.cancel();
-  const u = new SpeechSynthesisUtterance(text);
-  u.rate = 1.02; u.pitch = 1; u.volume = 1;
-  const en = _voices.find((v) => /en[-_]?(GB|SG|AU|US)/i.test(v.lang)) ?? _voices.find((v) => /^en/i.test(v.lang));
-  if (en) u.voice = en;
-  u.onend = onDone;
-  u.onerror = onDone;
-  window.speechSynthesis.speak(u);
-  return () => window.speechSynthesis.cancel();
-}
+// LiveDirector — Qwen3-TTS reference voices only (/demo/voice/<scene>.wav). No browser TTS.
 
 type RoleKey = 'resident' | 'responder' | 'ops';
 type Camera = RoleKey | 'all';
@@ -39,6 +15,12 @@ type DemoWindow = Window & {
     topicCount: (prefix: string) => number;
     setTransportOnline: (online: boolean) => void;
     shutdown: () => void;
+    quickJoin?: (name: string, role: string) => void;
+    quickJoinReady?: () => boolean;
+    residentProfileReady?: () => boolean;
+    responderProfileReady?: () => boolean;
+    configureResidentProfile?: () => void;
+    configureResponderProfile?: () => void;
   };
   __kkAgent?: {
     replyCount: (agent: string) => number;
@@ -99,6 +81,128 @@ interface FocusBox {
 
 const BRIDGE_URL = import.meta.env.VITE_BRIDGE_URL ?? '';
 const INCIDENT_LOCATION = { lng: 103.8644, lat: 1.3022 };
+
+type DemoSectionCategory = 'intro' | 'setup' | 'ai' | 'sos' | 'mqtt' | 'case' | 'citizen' | 'ops' | 'resilience' | 'closure';
+
+interface DemoSectionDef {
+  id: string;
+  category: DemoSectionCategory;
+  title: string;
+  chapter: string;
+}
+
+const DEMO_SECTIONS: DemoSectionDef[] = [
+  { id: 'intro', category: 'intro', title: 'Live opening', chapter: 'Intro · live control' },
+  { id: 'setup-resident', category: 'setup', title: 'Citizen login & aid card', chapter: 'Setup · citizen' },
+  { id: 'setup-responder', category: 'setup', title: 'Responder login & skills', chapter: 'Setup · responder' },
+  { id: 'setup-ops', category: 'setup', title: 'Ops login', chapter: 'Setup · operations' },
+  { id: 'ai-pelita', category: 'ai', title: 'Pelita · conditions', chapter: 'AI · conditions snapshot' },
+  { id: 'responder-duty', category: 'setup', title: 'Responder on duty', chapter: 'Responder · availability' },
+  { id: 'sos-bekal', category: 'sos', title: 'Medical SOS + Bekal', chapter: 'SOS · escalation' },
+  { id: 'mqtt-fanout', category: 'mqtt', title: 'Seed world + MQTT fan-out', chapter: 'MQTT · one truth' },
+  { id: 'case-room', category: 'case', title: 'Join · aid card · Host', chapter: 'Case room · private coordination' },
+  { id: 'citizen-relief', category: 'citizen', title: 'Approach markers', chapter: 'Citizen · help visible' },
+  { id: 'ops-verify', category: 'ops', title: 'Verify · Pondok · broadcast', chapter: 'Ops · verify & warn' },
+  { id: 'resilience', category: 'resilience', title: 'MQTT offline + reconcile', chapter: 'Resilience · honest state' },
+  { id: 'closure', category: 'closure', title: 'Alerts · dual ack · teardown', chapter: 'Closure · clean exit' },
+];
+
+const SECTION_CATEGORY_LABELS: Record<DemoSectionCategory, string> = {
+  intro: 'Intro',
+  setup: 'Setup',
+  ai: 'AI Kaki',
+  sos: 'SOS',
+  mqtt: 'MQTT',
+  case: 'Case room',
+  citizen: 'Citizen',
+  ops: 'Operations',
+  resilience: 'Resilience',
+  closure: 'Closure',
+};
+
+type DemoMilestone =
+  | 'residentLoggedIn'
+  | 'residentProfile'
+  | 'responderLoggedIn'
+  | 'responderProfile'
+  | 'opsLoggedIn'
+  | 'responderOnDuty'
+  | 'sosSent'
+  | 'seedDone'
+  | 'responderJoined'
+  | 'swarmDone'
+  | 'smokeVerified'
+  | 'broadcastSent'
+  | 'responderOnScene';
+
+const PREREQUISITES_BY_SECTION: Record<string, DemoMilestone[]> = {
+  intro: [],
+  'setup-resident': [],
+  'setup-responder': ['residentLoggedIn', 'residentProfile'],
+  'setup-ops': ['residentLoggedIn', 'residentProfile', 'responderLoggedIn', 'responderProfile'],
+  'ai-pelita': ['residentLoggedIn', 'residentProfile', 'responderLoggedIn', 'responderProfile', 'opsLoggedIn'],
+  'responder-duty': ['residentLoggedIn', 'residentProfile', 'responderLoggedIn', 'responderProfile', 'opsLoggedIn'],
+  'sos-bekal': ['residentLoggedIn', 'residentProfile', 'responderLoggedIn', 'responderProfile', 'opsLoggedIn', 'responderOnDuty'],
+  'mqtt-fanout': ['residentLoggedIn', 'residentProfile', 'responderLoggedIn', 'responderProfile', 'opsLoggedIn', 'responderOnDuty', 'sosSent'],
+  'case-room': ['residentLoggedIn', 'residentProfile', 'responderLoggedIn', 'responderProfile', 'opsLoggedIn', 'responderOnDuty', 'sosSent', 'seedDone'],
+  'citizen-relief': ['residentLoggedIn', 'residentProfile', 'responderLoggedIn', 'responderProfile', 'opsLoggedIn', 'responderOnDuty', 'sosSent', 'seedDone', 'responderJoined', 'swarmDone'],
+  'ops-verify': ['residentLoggedIn', 'residentProfile', 'responderLoggedIn', 'responderProfile', 'opsLoggedIn', 'responderOnDuty', 'sosSent', 'seedDone'],
+  resilience: ['residentLoggedIn', 'residentProfile', 'responderLoggedIn', 'responderProfile', 'opsLoggedIn', 'responderOnDuty', 'sosSent', 'seedDone', 'responderJoined', 'swarmDone', 'smokeVerified', 'broadcastSent'],
+  closure: ['residentLoggedIn', 'residentProfile', 'responderLoggedIn', 'responderProfile', 'opsLoggedIn', 'responderOnDuty', 'sosSent', 'seedDone', 'responderJoined', 'swarmDone', 'smokeVerified', 'broadcastSent', 'responderOnScene'],
+};
+const REQUIRED_VOICE_SCENES = [
+  'god-deploy',
+  'login-resident',
+  'login-responder',
+  'login-ops',
+  'resident-intro',
+  'profile-meiling-asthma',
+  'profile-meiling-inhaler',
+  'responder-intro',
+  'profile-aisha-medical',
+  'profile-aisha-hazard',
+  'ops-intro',
+  'resident-report',
+  'map-pelita-rain',
+  'pelita-result',
+  'responder-duty',
+  'resident-sos',
+  'focus-resident-sos',
+  'map-bekal-aed',
+  'bekal-intro',
+  'bekal-result',
+  'propagation',
+  'responder-join',
+  'responder-aidcard',
+  'responder-host',
+  'focus-resident-swarm',
+  'resident-relief',
+  'pondok-result',
+  'ops-broadcast-action',
+  'ops-broadcast',
+  'resilience-drop',
+  'responder-offline',
+  'reconciled',
+  'resident-alert-action',
+  'resident-safe',
+  'responder-resolve',
+  'outcome',
+] as const;
+
+const LOGIN_VOICE: Record<RoleKey, { id: string; text: string }> = {
+  resident: {
+    id: 'login-resident',
+    text: 'Mei Ling signs in as Citizen. The demo waits for each screen and enabled control before moving on.',
+  },
+  responder: {
+    id: 'login-responder',
+    text: 'Aisha signs in as Responder. The demo waits for each screen and enabled control before moving on.',
+  },
+  ops: {
+    id: 'login-ops',
+    text: 'Nadia signs in as Ops. The demo waits for each screen and enabled control before moving on.',
+  },
+};
 const ACTOR_LOCATIONS: Record<RoleKey, { lng: number; lat: number }> = {
   resident: INCIDENT_LOCATION,
   responder: { lng: 103.8588, lat: 1.3074 },
@@ -135,15 +239,27 @@ class DemoStopped extends Error {
   }
 }
 
+class DemoSectionSkip extends Error {
+  targetIndex: number;
+
+  constructor(targetIndex: number) {
+    super(`Demo skipped to section ${targetIndex + 1}`);
+    this.targetIndex = targetIndex;
+  }
+}
+
 export default function LiveDirector({ autostart, onExit }: { autostart: boolean; onExit: () => void }) {
   const [phase, setPhase] = useState<Phase>('idle');
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [loaded, setLoaded] = useState<Set<RoleKey>>(new Set());
   const [camera, setCamera] = useState<Camera>('resident');
+  const cameraRef = useRef<Camera>('resident');
+  cameraRef.current = camera;
   const [speaker, setSpeaker] = useState('AI Director');
   const [caption, setCaption] = useState('A clean, live demo begins with an empty session.');
   const [captionKind, setCaptionKind] = useState<CaptionKind>('action');
   const [chapter, setChapter] = useState('Ready');
+  const [currentSectionIndex, setCurrentSectionIndex] = useState(0);
   const [networkState, setNetworkState] = useState<'online' | 'stuttering'>('online');
   const [seedReceipt, setSeedReceipt] = useState<SeedReceipt | null>(null);
   const [status, setStatus] = useState<DemoStatus | null>(null);
@@ -167,16 +283,27 @@ export default function LiveDirector({ autostart, onExit }: { autostart: boolean
   const pausedRef = useRef(false);
   const cancelSpeechRef = useRef<null | (() => void)>(null);
   const stopRequestedRef = useRef(false);
+  const skipTargetRef = useRef<number | null>(null);
+  const sectionIndexRef = useRef(0);
+  const swarmMarkersRef = useRef(5);
   const restartRequestedRef = useRef(false);
   const runAfterPrepareRef = useRef(false);
   const autostartPreparedRef = useRef(false);
   const autostartRunRef = useRef(false);
+  const completedMilestonesRef = useRef<Set<DemoMilestone>>(new Set());
   const searchParams = useMemo(() => new URLSearchParams(window.location.search), []);
   const fast = searchParams.get('pace') === 'fast';
   const silent = searchParams.get('silent') === '1';
 
   const checkpoint = () => {
     if (stopRequestedRef.current) throw new DemoStopped();
+    if (skipTargetRef.current !== null) throw new DemoSectionSkip(skipTargetRef.current);
+  };
+
+  const clearPresenterOverlays = () => {
+    setPresentationCard(null);
+    setCutscene(null);
+    setFocusBox(null);
   };
 
   const wait = async (ms: number) => {
@@ -309,7 +436,12 @@ export default function LiveDirector({ autostart, onExit }: { autostart: boolean
     };
   };
 
+  const frameActive = (role: RoleKey) => cameraRef.current === 'all' || cameraRef.current === role;
+
   const click = async (role: RoleKey, read: () => HTMLElement | null, label: string) => {
+    if (!frameActive(role)) {
+      throw new Error(`Cannot puppet ${label} while ${role} map is hidden — switch camera first`);
+    }
     const element = await waitFor(read, label);
     await moveCursor(role, element);
     setCursor((current) => ({ ...current, down: true }));
@@ -367,14 +499,14 @@ export default function LiveDirector({ autostart, onExit }: { autostart: boolean
   };
 
   const switchCamera = async (next: Camera, nextChapter: string) => {
+    cameraRef.current = next;
     setCamera(next);
     setChapter(nextChapter);
     setCursor((current) => ({ ...current, visible: false }));
     await wait(fast ? 80 : 420);
   };
 
-  // Prefer Qwen WAV scenes generated from demo/incident-281.json. If a scene
-  // asset is missing, fall back to browser TTS so the live demo keeps moving.
+  // Qwen3-TTS scene WAV only — reference voices from demo/incident-281.json.
   const narrate = async (id: string, nextSpeaker: string, text: string) => {
     setSpeaker(nextSpeaker);
     setCaption(text);
@@ -384,30 +516,17 @@ export default function LiveDirector({ autostart, onExit }: { autostart: boolean
       await wait(Math.min(9000, Math.max(2600, text.length * 48)));
       return;
     }
-    let finished = false;
-    let cancel = () => {};
-    cancelSpeechRef.current = () => {
-      stopQwenScene();
-      cancel();
-    };
+    cancelSpeechRef.current = () => { stopQwenScene(); };
     const qwenPlayed = await playQwenScene(id);
-    checkpoint();
-    if (qwenPlayed) {
-      finished = true;
-    } else {
-      cancel = speakLine(text, () => { finished = true; });
-    }
-    // Cap so a missing/hung TTS engine can't stall the show; floor for reading time.
-    const maxMs = Math.min(14000, Math.max(3200, text.length * 58));
-    let waited = qwenPlayed ? maxMs : 0;
-    while (!finished && waited < maxMs) {
-      checkpoint();
-      if (pausedRef.current) { await rawSleep(80); continue; }
-      await rawSleep(90); waited += 90;
-    }
-    cancel();
-    stopQwenScene();
     cancelSpeechRef.current = null;
+    checkpoint();
+    if (!qwenPlayed) {
+      checkpoint();
+      throw new Error(
+        `Qwen3-TTS voice missing or invalid for "${id}". Expected /demo/voice/${id}.wav (reference clone). Run: npm run demo:voice`,
+      );
+    }
+    stopQwenScene();
     checkpoint();
   };
 
@@ -521,8 +640,10 @@ export default function LiveDirector({ autostart, onExit }: { autostart: boolean
     toggleLabel: string,
     spokenLabel: string,
     detail: string,
+    sceneId: string,
   ): Promise<boolean> => {
-    actionBeat(`${actors[role].roleLabel} · ${spokenLabel}`, detail);
+    setChapter(`${actors[role].roleLabel} · ${spokenLabel}`);
+    await narrate(sceneId, 'Director', detail);
     frameWindow(role).__kkMapDemo?.focusLocation(INCIDENT_LOCATION, 14.2);
     try {
       await ensureLayerOn(role, toggleLabel);
@@ -587,6 +708,7 @@ export default function LiveDirector({ autostart, onExit }: { autostart: boolean
     setStatus(null);
     setNetworkState('online');
     setVoiceReady(false);
+    completedMilestonesRef.current = new Set();
     setCamera('resident');
     setCaption('Opening one isolated demo session. Nothing outside it will be reset.');
     setCaptionKind('action');
@@ -614,7 +736,8 @@ export default function LiveDirector({ autostart, onExit }: { autostart: boolean
     const actor = actors[role];
     await switchCamera(role, `${actor.roleLabel} identity`);
     await flashRoleCard(role);
-    actionBeat(`${actor.roleLabel} identity`, `${actor.name} signs in as ${actor.roleLabel}.`);
+    const loginVoice = LOGIN_VOICE[role];
+    await narrate(loginVoice.id, 'Director', loginVoice.text);
     await click(role, () => button(role, 'Explore in demo mode'), 'demo mode button');
     await waitFor(
       () => inputByPlaceholder(role, 'Mei Ling'),
@@ -669,6 +792,343 @@ export default function LiveDirector({ autostart, onExit }: { autostart: boolean
       () => button('responder', desired ? 'On duty' : 'Off duty', true),
       desired ? 'confirmed on-duty state' : 'confirmed off-duty state',
     );
+  };
+
+  const appRoleFor = (role: RoleKey) => (role === 'resident' ? 'citizen' : role);
+
+  const profileButton = (role: RoleKey) => {
+    try {
+      return visible(frameDocument(role).querySelector('button[title="Your profile"]') as HTMLButtonElement);
+    } catch {
+      return null;
+    }
+  };
+
+  const identityReady = (role: RoleKey) => {
+    try {
+      const id = frameWindow(role).__kkDemo?.identity();
+      return id?.name === actors[role].name && id?.role === appRoleFor(role) ? id : null;
+    } catch {
+      return null;
+    }
+  };
+
+  const responderInCaseRoom = () => !!inputByPlaceholder('responder', 'Message the case');
+  const residentSosActive = () => !!button('resident', "I'm safe", true);
+  const responderPaged = () => !!button('responder', 'Someone nearby needs help');
+  const responderOnDutyNow = () => cleanText(button('responder', 'On duty', true)?.textContent ?? '') === 'On duty';
+  const broadcastDelivered = () => {
+    try {
+      return cleanText(frameDocument('resident').body.textContent).includes('Avoid MRT Exit B smoke incident');
+    } catch {
+      return false;
+    }
+  };
+  const residentSeesOnScene = () => {
+    try {
+      return cleanText(frameDocument('resident').body.textContent).includes('someone is on scene');
+    } catch {
+      return false;
+    }
+  };
+
+  const ensureLogin = async (role: RoleKey) => {
+    if (identityReady(role) && profileButton(role)) return;
+    const win = frameWindow(role);
+    if (win.__kkDemo?.quickJoinReady?.()) {
+      win.__kkDemo.quickJoin?.(actors[role].name, appRoleFor(role));
+      await waitFor(
+        () => (identityReady(role) && profileButton(role) ? true : null),
+        `${role} quickJoin`,
+        20000,
+      );
+      return;
+    }
+    await click(role, () => button(role, 'Explore in demo mode'), `${role} demo mode`);
+    await waitFor(() => inputByPlaceholder(role, 'Mei Ling'), `${role} role picker`);
+    await fill(role, () => inputByPlaceholder(role, 'Mei Ling'), actors[role].name, `${role} name`);
+    await click(role, () => {
+      const choice = frameDocument(role).querySelector<HTMLButtonElement>(`button[data-kk-role="${appRoleFor(role)}"]`);
+      return choice && !choice.disabled ? visible(choice) : null;
+    }, `${actors[role].roleLabel} role`);
+    await waitFor(() => (identityReady(role) && profileButton(role) ? true : null), `${role} identity`, 20000);
+  };
+
+  const residentProfileReady = () => {
+    try {
+      return frameWindow('resident').__kkDemo?.residentProfileReady?.() ?? false;
+    } catch {
+      return false;
+    }
+  };
+
+  const responderProfileReady = () => {
+    try {
+      return frameWindow('responder').__kkDemo?.responderProfileReady?.() ?? false;
+    } catch {
+      return false;
+    }
+  };
+
+  const ensureResidentProfile = async (options?: { presented?: boolean }) => {
+    await ensureLogin('resident');
+    if (residentProfileReady()) {
+      completedMilestonesRef.current.add('residentProfile');
+      return;
+    }
+    if (!options?.presented) {
+      frameWindow('resident').__kkDemo?.configureResidentProfile?.();
+      await wait(80);
+      completedMilestonesRef.current.add('residentProfile');
+      return;
+    }
+    await click('resident', () => profileButton('resident'), 'resident profile');
+    await fill('resident', () => inputByLabel('resident', 'Phone'), '9000 2810', 'resident phone');
+    await fill('resident', () => inputByLabel('resident', 'Allergies'), 'No known drug allergies', 'resident allergies');
+    await selectProfileChip('resident', 'Asthma');
+    await narrate(
+      'profile-meiling-asthma',
+      'Director',
+      'Mei Ling marks asthma so smoke guidance can use her actual aid card.',
+    );
+    await selectProfileChip('resident', 'Inhaler');
+    await narrate(
+      'profile-meiling-inhaler',
+      'Director',
+      'She also records that she carries an inhaler. Only a responder who joins her S O S can see this.',
+    );
+    await click('resident', () => button('resident', 'Save', true), 'save resident profile');
+    await closeSheet('resident', 'Profile');
+    completedMilestonesRef.current.add('residentProfile');
+  };
+
+  const ensureResponderProfile = async (options?: { presented?: boolean }) => {
+    await ensureLogin('responder');
+    if (responderProfileReady()) {
+      completedMilestonesRef.current.add('responderProfile');
+      return;
+    }
+    if (!options?.presented) {
+      frameWindow('responder').__kkDemo?.configureResponderProfile?.();
+      await wait(80);
+      completedMilestonesRef.current.add('responderProfile');
+      return;
+    }
+    await click('responder', () => profileButton('responder'), 'responder profile');
+    await selectProfileChip('responder', 'Medical');
+    await narrate(
+      'profile-aisha-medical',
+      'Director',
+      'Aisha marks medical support so the app can match her to a Medical S O S.',
+    );
+    await selectProfileChip('responder', 'Hazard');
+    await narrate(
+      'profile-aisha-hazard',
+      'Director',
+      'She also marks hazard support because smoke and blocked access affect this response.',
+    );
+    await click('responder', () => button('responder', 'Save', true), 'save responder profile');
+    await closeSheet('responder', 'Profile');
+    completedMilestonesRef.current.add('responderProfile');
+  };
+
+  const ensureSosSent = async () => {
+    if (residentSosActive() || responderPaged() || responderInCaseRoom()) return;
+    await ensureLogin('resident');
+    await click('resident', () => button('resident', 'Need help', true), 'need help');
+    await click('resident', () => button('resident', 'Medical', true), 'medical SOS');
+    await fill(
+      'resident',
+      () => inputByPlaceholder('resident', 'friend collapsed'),
+      'Nicoll Highway MRT Exit B: e-bike smoke at the covered walkway. Elderly man collapsed; I am the witness, he is the casualty. Need AED and responders.',
+      'SOS details',
+    );
+    await click('resident', () => button('resident', 'Send for help', true), 'send SOS');
+    await waitFor(
+      () => (residentSosActive() || responderPaged() ? document.body : null),
+      'medical SOS live',
+      20000,
+    );
+  };
+
+  const ensureSeedDone = async () => {
+    if (seedReceipt) return;
+    await seedScenario();
+  };
+
+  const ensureResponderJoined = async () => {
+    if (responderInCaseRoom()) return;
+    await ensureLogin('responder');
+    if (button('responder', 'Someone nearby needs help')) {
+      await click('responder', () => button('responder', 'Someone nearby needs help'), 'open nearby SOS');
+    }
+    await click('responder', () => button('responder', 'Join & help'), 'join SOS');
+    await waitFor(() => (responderInCaseRoom() ? document.body : null), 'responder in case room', 20000);
+  };
+
+  const ensureSwarmDone = async () => {
+    const markers = frameWindow('resident').__kkMapDemo?.responderMarkerCount() ?? 0;
+    if (swarmMarkersRef.current > 0 && markers >= Math.min(swarmMarkersRef.current, 5)) return;
+    const swarm = await spawnSwarm();
+    if (!swarm.responders) throw new Error('God Mode swarm did not attach responders to the SOS');
+    swarmMarkersRef.current = Math.min(swarm.responders, 5);
+    await waitFor(
+      () => ((frameWindow('resident').__kkMapDemo?.responderMarkerCount() ?? 0) >= swarmMarkersRef.current ? document.body : null),
+      'swarm approach markers',
+      30000,
+    );
+  };
+
+  const ensureSmokeVerified = async () => {
+    await ensureLogin('ops');
+    if (!button('ops', 'Smoke at MRT Exit B')) return;
+    await click('ops', () => button('ops', 'Ops'), 'ops queue');
+    await click('ops', () => button('ops', 'Smoke at MRT Exit B'), 'smoke report');
+    await click('ops', () => button('ops', 'Verify → publish as incident'), 'verify report');
+  };
+
+  const ensureBroadcastSent = async () => {
+    if (broadcastDelivered()) return;
+    await ensureLogin('ops');
+    await click('ops', () => button('ops', 'Broadcast', true), 'broadcast action');
+    await click('ops', () => button('ops', 'Everyone', true), 'broadcast audience');
+    await click('ops', () => button('ops', 'Emergency', true), 'broadcast urgency');
+    await fill('ops', () => inputByPlaceholder('ops', 'Bishan'), 'Nicoll Highway MRT Exit B', 'broadcast area');
+    await fill('ops', () => inputByPlaceholder('ops', 'Flash flood'), 'Avoid MRT Exit B smoke incident', 'broadcast message');
+    await fill('ops', () => inputByPlaceholder('ops', 'What people should do'), 'Keep the covered walkway and access road clear for responders.', 'broadcast details');
+    await click('ops', () => button('ops', 'Send broadcast', true), 'send broadcast');
+    await waitFor(() => (broadcastDelivered() ? document.body : null), 'resident broadcast alert', 20000);
+  };
+
+  const ensureResponderOnScene = async () => {
+    if (residentSeesOnScene()) return;
+    frameWindow('responder').__kkDemo?.setTransportOnline(true);
+    setNetworkState('online');
+    await ensureLogin('responder');
+    await ensureResponderJoined();
+    if (button('responder', 'On scene', true)) {
+      await click('responder', () => button('responder', 'On scene', true), 'mark on scene');
+    }
+    await waitFor(() => (residentSeesOnScene() ? document.body : null), 'resident sees on scene', 20000);
+  };
+
+  const milestoneStillNeeded = (milestone: DemoMilestone): boolean => {
+    switch (milestone) {
+      case 'residentLoggedIn':
+        return !identityReady('resident') || !profileButton('resident');
+      case 'residentProfile':
+        return !residentProfileReady();
+      case 'responderLoggedIn':
+        return !identityReady('responder') || !profileButton('responder');
+      case 'responderProfile':
+        return !responderProfileReady();
+      case 'opsLoggedIn':
+        return !identityReady('ops') || !profileButton('ops');
+      case 'responderOnDuty':
+        return !responderOnDutyNow();
+      case 'sosSent':
+        return !(residentSosActive() || responderPaged() || responderInCaseRoom());
+      case 'seedDone':
+        return !seedReceipt;
+      case 'responderJoined':
+        return !responderInCaseRoom();
+      case 'swarmDone': {
+        const markers = frameWindow('resident').__kkMapDemo?.responderMarkerCount() ?? 0;
+        return swarmMarkersRef.current <= 0 || markers < Math.min(swarmMarkersRef.current, 5);
+      }
+      case 'smokeVerified':
+        return !!button('ops', 'Smoke at MRT Exit B');
+      case 'broadcastSent':
+        return !broadcastDelivered();
+      case 'responderOnScene':
+        return !residentSeesOnScene();
+      default:
+        return true;
+    }
+  };
+
+  const milestoneNeedsCamera = (milestone: DemoMilestone) =>
+    !['residentLoggedIn', 'residentProfile', 'responderLoggedIn', 'responderProfile', 'opsLoggedIn', 'seedDone'].includes(milestone);
+
+  const roleForMilestone = (milestone: DemoMilestone): RoleKey | null => {
+    if (milestone.startsWith('resident') || milestone === 'sosSent') return 'resident';
+    if (milestone.startsWith('responder') || milestone === 'responderOnDuty' || milestone === 'responderOnScene') return 'responder';
+    if (milestone.startsWith('ops') || milestone === 'smokeVerified' || milestone === 'broadcastSent') return 'ops';
+    if (milestone === 'swarmDone') return 'resident';
+    return null;
+  };
+
+  const ensurePrerequisitesForSection = async (sectionIndex: number) => {
+    const section = DEMO_SECTIONS[sectionIndex];
+    if (!section) return;
+    const milestones = PREREQUISITES_BY_SECTION[section.id] ?? [];
+    const pending = milestones.filter(
+      (milestone) => !completedMilestonesRef.current.has(milestone) || milestoneStillNeeded(milestone),
+    );
+    if (pending.length === 0) return;
+
+    for (const milestone of pending) {
+      checkpoint();
+      const focusRole = roleForMilestone(milestone);
+      if (focusRole && milestoneNeedsCamera(milestone) && !frameActive(focusRole)) {
+        await switchCamera(focusRole, section.chapter);
+      }
+      switch (milestone) {
+        case 'residentLoggedIn':
+          await ensureLogin('resident');
+          completedMilestonesRef.current.add('residentLoggedIn');
+          break;
+        case 'residentProfile':
+          await ensureResidentProfile();
+          break;
+        case 'responderLoggedIn':
+          await ensureLogin('responder');
+          completedMilestonesRef.current.add('responderLoggedIn');
+          break;
+        case 'responderProfile':
+          await ensureResponderProfile();
+          break;
+        case 'opsLoggedIn':
+          await ensureLogin('ops');
+          completedMilestonesRef.current.add('opsLoggedIn');
+          break;
+        case 'responderOnDuty':
+          if (!responderOnDutyNow()) await ensureResponderDuty(true);
+          completedMilestonesRef.current.add('responderOnDuty');
+          break;
+        case 'sosSent':
+          await ensureSosSent();
+          completedMilestonesRef.current.add('sosSent');
+          break;
+        case 'seedDone':
+          await ensureSeedDone();
+          completedMilestonesRef.current.add('seedDone');
+          break;
+        case 'responderJoined':
+          await ensureResponderJoined();
+          completedMilestonesRef.current.add('responderJoined');
+          break;
+        case 'swarmDone':
+          await ensureSwarmDone();
+          completedMilestonesRef.current.add('swarmDone');
+          break;
+        case 'smokeVerified':
+          await ensureSmokeVerified();
+          completedMilestonesRef.current.add('smokeVerified');
+          break;
+        case 'broadcastSent':
+          await ensureBroadcastSent();
+          completedMilestonesRef.current.add('broadcastSent');
+          break;
+        case 'responderOnScene':
+          await ensureResponderOnScene();
+          completedMilestonesRef.current.add('responderOnScene');
+          break;
+        default:
+          break;
+      }
+    }
+    await wait(fast ? 40 : 120);
   };
 
   const closeSheet = async (role: RoleKey, heading: string) => {
@@ -832,18 +1292,71 @@ export default function LiveDirector({ autostart, onExit }: { autostart: boolean
     setPaused(next);
     if (next) {
       pauseDemoAudio();
-      if (typeof window !== 'undefined' && window.speechSynthesis) window.speechSynthesis.pause();
       setCursor((current) => ({ ...current, down: false }));
     } else {
       resumeDemoAudio();
-      if (typeof window !== 'undefined' && window.speechSynthesis) window.speechSynthesis.resume();
     }
   };
 
   const stopActiveNarration = () => {
     stopQwenScene();
     cancelSpeechRef.current?.();
-    if (typeof window !== 'undefined' && window.speechSynthesis) window.speechSynthesis.cancel();
+  };
+
+  /** Best-effort synchronous teardown so skip can escape AI waits, sheets, offline MQTT, etc. */
+  const stabilizeDemoUiForSkip = () => {
+    stopActiveNarration();
+    clearPresenterOverlays();
+    setNetworkState('online');
+    setCursor((current) => ({ ...current, down: false, visible: false }));
+    resumeDemoAudio();
+    for (const role of ['resident', 'responder', 'ops'] as RoleKey[]) {
+      try {
+        if (aiKakiOpen(role)) {
+          const header = aiHeader(role);
+          const buttons = header ? Array.from(header.querySelectorAll<HTMLButtonElement>('button')) : [];
+          buttons[buttons.length - 1]?.click();
+        }
+        const doc = frameDocument(role);
+        for (const header of Array.from(doc.querySelectorAll('header'))) {
+          const label = cleanText(header.textContent);
+          if (/Profile|Alerts|Broadcast|Need help|Medical|Ops|AI Kaki/i.test(label)) {
+            header.querySelector('button')?.click();
+          }
+        }
+        if (layerPanelOpen(role)) button(role, 'Layers')?.click();
+        frameWindow(role).__kkMapDemo?.clearEvidence();
+        if (role === 'responder') frameWindow(role).__kkDemo?.setTransportOnline(true);
+      } catch {
+        // Embedded frame may still be loading.
+      }
+    }
+  };
+
+  const requestSectionJump = (targetIndex: number) => {
+    if (phase !== 'running') return;
+    const clamped = Math.max(0, Math.min(DEMO_SECTIONS.length - 1, targetIndex));
+    if (clamped === sectionIndexRef.current) return;
+    stabilizeDemoUiForSkip();
+    skipTargetRef.current = clamped;
+    pausedRef.current = false;
+    setPaused(false);
+    actionBeat(
+      DEMO_SECTIONS[clamped].chapter,
+      `Skipping to ${SECTION_CATEGORY_LABELS[DEMO_SECTIONS[clamped].category]} · ${DEMO_SECTIONS[clamped].title}.`,
+    );
+  };
+
+  const skipSectionBack = () => requestSectionJump(sectionIndexRef.current - 1);
+  const skipSectionForward = () => requestSectionJump(sectionIndexRef.current + 1);
+
+  const recoverFromStuck = () => {
+    if (phase !== 'running') return;
+    skipTargetRef.current = null;
+    pausedRef.current = false;
+    setPaused(false);
+    stabilizeDemoUiForSkip();
+    actionBeat(chapter, 'Recovered overlays, sheets, and transport. Use skip forward if this section stays stuck.');
   };
 
   const requestStop = (restart: boolean) => {
@@ -877,288 +1390,364 @@ export default function LiveDirector({ autostart, onExit }: { autostart: boolean
     await prepare();
   };
 
+  const runSection = async (sectionId: string) => {
+    switch (sectionId) {
+      case 'intro':
+        await switchCamera('resident', 'Live setup · Director');
+        await flashPresentationCard(
+          'LIVE APP CONTROL',
+          'SMOKE AT EXIT B',
+          'THREE LIVE MAPS',
+          'One incident across a citizen, a responder, and ops.',
+        );
+        await narrate(
+          'god-deploy',
+          'Director',
+          'This is not a video. I am opening three real users on one live map, then driving reports, responders, alerts, and case state through M Q T T.',
+        );
+        return;
+      case 'setup-resident':
+        await login('resident');
+        await flashCutscene(
+          'Smoke at MRT Exit B',
+          'Rain, e-bike smoke, a crowded choke point — seconds before someone goes down.',
+        );
+        await narrate(
+          'resident-intro',
+          'Mei Ling',
+          'In this drill, rain has crowded people under the covered M R T exit while an e bike smokes near the choke point. I am asthmatic, so first I make sure my aid card is set.',
+        );
+        await ensureResidentProfile({ presented: true });
+        return;
+      case 'setup-responder':
+        await login('responder');
+        await narrate(
+          'responder-intro',
+          'Aisha',
+          'I am Aisha, a nearby community responder. I begin in lepak mode: no mission, no private details, and no false urgency until I choose to go on duty.',
+        );
+        await ensureResponderProfile({ presented: true });
+        return;
+      case 'setup-ops':
+        await login('ops');
+        await narrate(
+          'ops-intro',
+          'Nadia',
+          'I am Nadia in ops. I am not here to improvise heroics; I see reports, responders, cases, and map evidence, then decide what to publish and who to send.',
+        );
+        return;
+      case 'ai-pelita':
+        await switchCamera('resident', 'Citizen · Pelita reads the map');
+        await narrate(
+          'resident-report',
+          'Director',
+          'Pelita is an A I Kaki agent, not another human role. Mei Ling asks one conditions question, and Pelita reads the same map snapshot already refreshed by the app.',
+        );
+        await askAiKaki(
+          'resident',
+          'Pelita',
+          'How is it looking around me right now near the MRT exit?',
+          'rain|traffic|air|PSI|condition',
+          'pelita-result',
+          'Pelita has turned the cached rain, air, and traffic readings into one useful local answer. No extra upstream fetch was needed.',
+          async () => {
+            await previewMapLayer(
+              'resident',
+              'rainfall',
+              'Rainfall',
+              'rainfall evidence',
+              'Pelita is checking the cached rainfall reading already available on Mei Ling’s map.',
+              'map-pelita-rain',
+            );
+          },
+        );
+        return;
+      case 'responder-duty':
+        await switchCamera('responder', 'Responder · availability and map');
+        await narrate(
+          'responder-duty',
+          'Aisha',
+          'I am nearby, but the system should not page me just because I exist. I go on duty and declare medical plus hazard support.',
+        );
+        await ensureResponderDuty(true);
+        return;
+      case 'sos-bekal':
+        await switchCamera('resident', 'Citizen · urgent escalation');
+        await narrate(
+          'resident-sos',
+          'Mei Ling',
+          'Now it is an emergency. An elderly man near the smoke has collapsed and is not responding properly. I am the witness, he is the casualty, and this needs a Medical S O S.',
+        );
+        await click('resident', () => button('resident', 'Need help', true), 'need help');
+        await click('resident', () => button('resident', 'Medical', true), 'medical SOS');
+        await fill('resident', () => inputByPlaceholder('resident', 'friend collapsed'), 'Nicoll Highway MRT Exit B: e-bike smoke at the covered walkway. Elderly man collapsed; I am the witness, he is the casualty. Need AED and responders.', 'SOS details');
+        await click('resident', () => button('resident', 'Send for help', true), 'send SOS');
+        await focusSosArea(
+          'resident',
+          'focus-resident-sos',
+          'The map zooms into the actual S O S at Exit B. From this point onward, every hospital, A E D, traffic, camera, and weather check is measured from this incident.',
+        );
+        await narrate(
+          'bekal-intro',
+          'Director',
+          'Bekal is the S O S companion A I. It does not dispatch anyone. It calls the A E D and hospital skills, then gives Mei Ling specific guidance while the response forms.',
+        );
+        await askAiKaki(
+          'resident',
+          'Bekal',
+          'Elderly man collapsed after e-bike smoke at Nicoll Highway MRT Exit B. I am the witness; he is the casualty. Which AED and A&E hospital should bystanders use, and what should I do while Aisha is coming?',
+          'AED|hospital|A&E|CPR|995',
+          'bekal-result',
+          'Bekal has returned the nearest A E D, an emergency hospital, and immediate safety guidance. Those skill results are also rendered as map pins.',
+          async () => {
+            await previewMapLayer(
+              'resident',
+              'aeds',
+              'AED',
+              'nearest AED',
+              'While Bekal checks, the map exposes the nearest bundled A E D around the S O S.',
+              'map-bekal-aed',
+            );
+          },
+        );
+        await waitFor(() => button('responder', 'Someone nearby needs help'), 'responder page');
+        return;
+      case 'mqtt-fanout':
+        await seedScenario();
+        await switchCamera('all', 'MQTT · one truth in three clients');
+        await narrate(
+          'propagation',
+          'Director',
+          'The same incident now exists in three maps. Mei Ling sees her S O S. Aisha receives a matched page. Nadia sees smoke reports and the live case forming.',
+        );
+        await flashPresentationCard(
+          'MQTT FANOUT',
+          '3 REPORTS → OPS CONTEXT',
+          '1 SOS → PRIVATE CASE',
+          'Retained topics replay into every role without retyping the story.',
+        );
+        return;
+      case 'case-room':
+        await switchCamera('responder', 'Responder · accepts with map evidence');
+        await narrate(
+          'responder-join',
+          'Aisha',
+          'Before I join, I see the category and location but not private medical details. Once I commit, the case room opens and the aid card becomes useful.',
+        );
+        await click('responder', () => button('responder', 'Someone nearby needs help'), 'open nearby SOS');
+        await click('responder', () => button('responder', 'Join & help'), 'join SOS');
+        await revealCaseAidCard('responder');
+        await narrate(
+          'responder-aidcard',
+          'Aisha',
+          'There — Mei Ling’s aid card: asthma, inhaler, no drug allergies. That only appeared because I joined the private case room.',
+        );
+        {
+          const swarm = await spawnSwarm();
+          if (!swarm.responders) throw new Error('God Mode swarm did not attach responders to the SOS');
+          swarmMarkersRef.current = Math.min(swarm.responders, 5);
+        }
+        await narrate(
+          'responder-host',
+          'Aisha',
+          'Every case room has Host — slash commands, not another chat bot. I type slash host status; the whole room gets the same structured readout from live case data.',
+        );
+        await fill('responder', () => inputByPlaceholder('responder', 'Message the case'), '/host status', 'host command');
+        const hostCmdInput = await waitFor(() => inputByPlaceholder('responder', 'Message the case'), 'case chat input');
+        const sendHostCmd = hostCmdInput.parentElement?.querySelector('button') as HTMLButtonElement | null;
+        if (sendHostCmd) await click('responder', () => sendHostCmd, 'send host command');
+        await holdHostReply('responder');
+        return;
+      case 'citizen-relief':
+        await switchCamera('resident', 'Citizen · help becomes visible');
+        await waitFor(
+          () => (frameWindow('resident').__kkMapDemo?.responderMarkerCount() ?? 0) >= swarmMarkersRef.current
+            ? document.body
+            : null,
+          'resident swarm markers',
+          30000,
+        );
+        await focusSosArea(
+          'resident',
+          'focus-resident-swarm',
+          'Mei Ling returns to the S O S area. The close map now shows the casualty point and responder approach markers together.',
+        );
+        await narrate(
+          'resident-relief',
+          'Mei Ling',
+          'This is the moment that matters. My map does not merely say help is coming. I can see nearby responder approach markers, while the full supporting roster remains in the case room.',
+        );
+        return;
+      case 'ops-verify':
+        await switchCamera('ops', 'Ops · verify before broadcast');
+        await click('ops', () => button('ops', 'Ops'), 'ops queue');
+        await click('ops', () => button('ops', 'Smoke at MRT Exit B'), 'smoke report');
+        await click('ops', () => button('ops', 'Verify → publish as incident'), 'verify report');
+        await switchCamera('ops', 'Ops · command the whole picture');
+        await askAiKaki(
+          'ops',
+          'Pondok',
+          'Ops picture for Exit B: active medical SOS for collapsed elderly casualty, supporting smoke and access reports, on-duty responders. Which responder fits AED support and what facts should I verify before broadcast?',
+          'Aisha|Wei Jian|AED|medical|responder|SOS',
+          'pondok-result',
+          'Pondok has compared the live roster with the case and highlighted skill-fit candidates for medical and A E D support. Nadia still decides every deployment.',
+          async () => {},
+        );
+        setChapter('Ops · public warning');
+        await narrate(
+          'ops-broadcast-action',
+          'Director',
+          'Nadia sends the warning to citizens and responders, labels the area Exit B, marks it Emergency, and gives one clear public action: keep the walkway and access road clear.',
+        );
+        await narrate(
+          'ops-broadcast',
+          'Nadia',
+          'The smoke report is verified, so I warn people away from the station exit without exposing the private case room.',
+        );
+        await click('ops', () => button('ops', 'Broadcast', true), 'broadcast action');
+        await click('ops', () => button('ops', 'Everyone', true), 'broadcast audience');
+        await click('ops', () => button('ops', 'Emergency', true), 'broadcast urgency');
+        await fill('ops', () => inputByPlaceholder('ops', 'Bishan'), 'Nicoll Highway MRT Exit B', 'broadcast area');
+        await fill('ops', () => inputByPlaceholder('ops', 'Flash flood'), 'Avoid MRT Exit B smoke incident', 'broadcast message');
+        await fill('ops', () => inputByPlaceholder('ops', 'What people should do'), 'Keep the covered walkway and access road clear for responders.', 'broadcast details');
+        await click('ops', () => button('ops', 'Send broadcast', true), 'send broadcast');
+        await flashPresentationCard(
+          'PUBLIC WARNING SENT',
+          'AVOID EXIT B',
+          'PRIVATE CASE STAYS PRIVATE',
+          'The public receives the hazard and access instruction. Medical details remain inside the S O S room.',
+        );
+        return;
+      case 'resilience':
+        await switchCamera('responder', 'Resilience · useful while the link stutters');
+        await narrate(
+          'resilience-drop',
+          'Director',
+          "Now I break Aisha's M Q T T link. She marks on scene locally, but Mei Ling must not see a false arrival until the broker delivers it.",
+        );
+        frameWindow('responder').__kkDemo?.setTransportOnline(false);
+        setNetworkState('stuttering');
+        await wait(fast ? 100 : 900);
+        await click('responder', () => button('responder', 'On scene', true), 'offline on-scene update');
+        await narrate(
+          'responder-offline',
+          'Aisha',
+          'I mark myself on scene while the connection is down. My phone keeps the retained update queued instead of lying to Mei Ling.',
+        );
+        await switchCamera('resident', 'Citizen · no false acknowledgement');
+        frameWindow('responder').__kkDemo?.setTransportOnline(true);
+        setNetworkState('online');
+        await waitFor(
+          () => cleanText(frameDocument('resident').body.textContent).includes('someone is on scene') ? document.body : null,
+          'queued arrival to reconcile',
+          20000,
+        );
+        await narrate(
+          'reconciled',
+          'Director',
+          "The connection returns. M Q T T flushes the queued retained update, and Mei Ling's map reconciles to someone on scene.",
+        );
+        return;
+      case 'closure':
+        await switchCamera('resident', 'Citizen · trusted alert and closure');
+        await narrate(
+          'resident-alert-action',
+          'Director',
+          'The ops warning has reached Mei Ling. The demo opens her alerts to show the delivered result before closing the case.',
+        );
+        await click('resident', () => frameDocument('resident').querySelector('button[title="Alerts"]'), 'resident alerts');
+        await waitFor(() => cleanText(frameDocument('resident').body.textContent).includes('Avoid MRT Exit B smoke incident') ? document.body : null, 'resident broadcast');
+        await narrate(
+          'resident-safe',
+          'Mei Ling',
+          "The alert tells everyone else what to avoid. In my case room I can see responder presence, and I am now clear of the smoke. So I tap I'm safe.",
+        );
+        await closeSheet('resident', 'Alerts');
+        await click('resident', () => button('resident', "I'm safe", true), 'citizen safe acknowledgement');
+        await switchCamera('responder', 'Responder · dual acknowledgement');
+        await narrate(
+          'responder-resolve',
+          'Aisha',
+          "The citizen's safe button is not enough by itself, and my field confirmation is not enough alone. The case closes only when both facts exist.",
+        );
+        await click('responder', () => button('responder', 'Resolved', true), 'responder resolution');
+        await flashPresentationCard(
+          'DUAL ACKNOWLEDGEMENT',
+          'CITIZEN SAFE',
+          'RESPONDER RESOLVED',
+          'Only both acknowledgements close the live S O S.',
+        );
+        await switchCamera('all', 'Shared outcome');
+        await narrate(
+          'outcome',
+          'Director',
+          'Map evidence, case room, Host, M Q T T, and alerts served one story. This performance is complete — I will now remove everything this session created.',
+        );
+        await switchCamera('resident', 'Clean teardown · Director');
+        {
+          const before = await api<DemoStatus>(`/api/demo/${sessionId}/status`);
+          setStatus(before);
+        }
+        await cleanup();
+        return;
+      default:
+        throw new Error(`Unknown demo section: ${sectionId}`);
+    }
+  };
+
   const run = async () => {
     if (!sessionId || loaded.size !== 3) return;
     setPhase('running');
     setError(null);
     stopRequestedRef.current = false;
     restartRequestedRef.current = false;
+    skipTargetRef.current = null;
+    sectionIndexRef.current = 0;
+    setCurrentSectionIndex(0);
+    if (!silent && !fast) {
+      const missingVoice = await missingQwenScenes([...REQUIRED_VOICE_SCENES]);
+      if (missingVoice.length) {
+        setError(`Missing Qwen3-TTS voice files: ${missingVoice.join(', ')}. Run: npm run demo:voice`);
+        setPhase('failed');
+        return;
+      }
+      if (!voiceReady) {
+        try {
+          await unlockDemoAudio();
+          setVoiceReady(true);
+        } catch {
+          // Play/Run already unlocked from presenter click; continue.
+        }
+      }
+    }
     try {
-      await switchCamera('resident', 'Live setup · Director');
-      await flashPresentationCard(
-        'LIVE APP CONTROL',
-        'SMOKE AT EXIT B',
-        'THREE LIVE MAPS',
-        'One incident across a citizen, a responder, and ops.',
-      );
-      await narrate(
-        'god-deploy',
-        'Director',
-        'This is not a video. I am opening three real users on one live map, then driving reports, responders, alerts, and case state through M Q T T.',
-      );
-
-      await login('resident');
-      await flashCutscene(
-        'Smoke at MRT Exit B',
-        'Rain, e-bike smoke, a crowded choke point — seconds before someone goes down.',
-      );
-      await narrate(
-        'resident-intro',
-        'Mei Ling',
-        'In this drill, rain has crowded people under the covered M R T exit while an e bike smokes near the choke point. I am asthmatic, so first I make sure my aid card is set.',
-      );
-      await click('resident', () => frameDocument('resident').querySelector('button[title="Your profile"]'), 'resident profile');
-      await fill('resident', () => inputByLabel('resident', 'Phone'), '9000 2810', 'resident phone');
-      await fill('resident', () => inputByLabel('resident', 'Allergies'), 'No known drug allergies', 'resident allergies');
-      await selectProfileChip('resident', 'Asthma');
-      await selectProfileChip('resident', 'Inhaler');
-      await click('resident', () => button('resident', 'Save', true), 'save resident profile');
-      await closeSheet('resident', 'Profile');
-
-      await login('responder');
-      await narrate(
-        'responder-intro',
-        'Aisha',
-        'I am Aisha, a nearby community responder. I begin in lepak mode: no mission, no private details, and no false urgency until I choose to go on duty.',
-      );
-      await click('responder', () => frameDocument('responder').querySelector('button[title="Your profile"]'), 'responder profile');
-      await selectProfileChip('responder', 'Medical');
-      await selectProfileChip('responder', 'Hazard');
-      await click('responder', () => button('responder', 'Save', true), 'save responder profile');
-      await closeSheet('responder', 'Profile');
-
-      await login('ops');
-      await narrate(
-        'ops-intro',
-        'Nadia',
-        'I am Nadia in ops. I am not here to improvise heroics; I see reports, responders, cases, and map evidence, then decide what to publish and who to send.',
-      );
-
-      await switchCamera('resident', 'Citizen · Pelita reads the map');
-      await narrate(
-        'resident-report',
-        'Director',
-        'Pelita is an A I Kaki agent, not another human role. Mei Ling asks one conditions question, and Pelita reads the same map snapshot already refreshed by the app.',
-      );
-      await askAiKaki(
-        'resident',
-        'Pelita',
-        'How is it looking around me right now near the MRT exit?',
-        'rain|traffic|air|PSI|condition',
-        'pelita-result',
-        'Pelita has turned the cached rain, air, and traffic readings into one useful local answer. No extra upstream fetch was needed.',
-        async () => {
-          await previewMapLayer('resident', 'rainfall', 'Rainfall', 'rainfall evidence', 'Pelita is checking the cached rainfall reading already available on Mei Ling’s map.');
-        },
-      );
-
-      await switchCamera('responder', 'Responder · availability and map');
-      await narrate(
-        'responder-duty',
-        'Aisha',
-        'I am nearby, but the system should not page me just because I exist. I go on duty and declare medical plus hazard support.',
-      );
-      await ensureResponderDuty(true);
-
-      await switchCamera('resident', 'Citizen · urgent escalation');
-      await narrate(
-        'resident-sos',
-        'Mei Ling',
-        'Now it is an emergency. An elderly man near the smoke has collapsed and is not responding properly. I am the witness, he is the casualty, and this needs a Medical S O S.',
-      );
-      await click('resident', () => button('resident', 'Need help', true), 'need help');
-      await click('resident', () => button('resident', 'Medical', true), 'medical SOS');
-      await fill('resident', () => inputByPlaceholder('resident', 'friend collapsed'), 'Nicoll Highway MRT Exit B: e-bike smoke at the covered walkway. Elderly man collapsed; I am the witness, he is the casualty. Need AED and responders.', 'SOS details');
-      await click('resident', () => button('resident', 'Send for help', true), 'send SOS');
-      await focusSosArea(
-        'resident',
-        'focus-resident-sos',
-        'The map zooms into the actual S O S at Exit B. From this point onward, every hospital, A E D, traffic, camera, and weather check is measured from this incident.',
-      );
-      await narrate(
-        'bekal-intro',
-        'Director',
-        'Bekal is the S O S companion A I. It does not dispatch anyone. It calls the A E D and hospital skills, then gives Mei Ling specific guidance while the response forms.',
-      );
-      await askAiKaki(
-        'resident',
-        'Bekal',
-        'Elderly man collapsed after e-bike smoke at Nicoll Highway MRT Exit B. I am the witness; he is the casualty. Which AED and A&E hospital should bystanders use, and what should I do while Aisha is coming?',
-        'AED|hospital|A&E|CPR|995',
-        'bekal-result',
-        'Bekal has returned the nearest A E D, an emergency hospital, and immediate safety guidance. Those skill results are also rendered as map pins.',
-        async () => {
-          await previewMapLayer('resident', 'aeds', 'AED', 'nearest AED', 'While Bekal checks, the map exposes the nearest bundled A E D around the S O S.');
-        },
-      );
-      await waitFor(() => button('responder', 'Someone nearby needs help'), 'responder page');
-
-      await seedScenario();
-      await switchCamera('all', 'MQTT · one truth in three clients');
-      await narrate(
-        'propagation',
-        'Director',
-        'The same incident now exists in three maps. Mei Ling sees her S O S. Aisha receives a matched page. Nadia sees smoke reports and the live case forming.',
-      );
-      await flashPresentationCard(
-        'MQTT FANOUT',
-        '3 REPORTS → OPS CONTEXT',
-        '1 SOS → PRIVATE CASE',
-        'Retained topics replay into every role without retyping the story.',
-      );
-
-      await switchCamera('responder', 'Responder · accepts with map evidence');
-      await narrate(
-        'responder-join',
-        'Aisha',
-        'Before I join, I see the category and location but not private medical details. Once I commit, the case room opens and the aid card becomes useful.',
-      );
-      await click('responder', () => button('responder', 'Someone nearby needs help'), 'open nearby SOS');
-      await click('responder', () => button('responder', 'Join & help'), 'join SOS');
-      await revealCaseAidCard('responder');
-      await narrate(
-        'responder-aidcard',
-        'Aisha',
-        'There — Mei Ling’s aid card: asthma, inhaler, no drug allergies. That only appeared because I joined the private case room.',
-      );
-      const swarm = await spawnSwarm();
-      if (!swarm.responders) throw new Error('God Mode swarm did not attach responders to the SOS');
-      const renderedSwarmMarkers = Math.min(swarm.responders, 5);
-
-      await narrate(
-        'responder-host',
-        'Aisha',
-        'Every case room has Host — slash commands, not another chat bot. I type slash host status; the whole room gets the same structured readout from live case data.',
-      );
-      await fill('responder', () => inputByPlaceholder('responder', 'Message the case'), '/host status', 'host command');
-      const hostCmdInput = await waitFor(() => inputByPlaceholder('responder', 'Message the case'), 'case chat input');
-      const sendHostCmd = hostCmdInput.parentElement?.querySelector('button') as HTMLButtonElement | null;
-      if (sendHostCmd) await click('responder', () => sendHostCmd, 'send host command');
-      await holdHostReply('responder');
-
-      await switchCamera('resident', 'Citizen · help becomes visible');
-      await waitFor(
-        () => (frameWindow('resident').__kkMapDemo?.responderMarkerCount() ?? 0) >= renderedSwarmMarkers
-          ? document.body
-          : null,
-        'resident swarm markers',
-        30000,
-      );
-      await focusSosArea(
-        'resident',
-        'focus-resident-swarm',
-        'Mei Ling returns to the S O S area. The close map now shows the casualty point and responder approach markers together.',
-      );
-      await narrate(
-        'resident-relief',
-        'Mei Ling',
-        'This is the moment that matters. My map does not merely say help is coming. I can see nearby responder approach markers, while the full supporting roster remains in the case room.',
-      );
-
-      await switchCamera('ops', 'Ops · verify before broadcast');
-      await click('ops', () => button('ops', 'Ops'), 'ops queue');
-      await click('ops', () => button('ops', 'Smoke at MRT Exit B'), 'smoke report');
-      await click('ops', () => button('ops', 'Verify → publish as incident'), 'verify report');
-
-      await switchCamera('ops', 'Ops · command the whole picture');
-      await askAiKaki(
-        'ops',
-        'Pondok',
-        'Ops picture for Exit B: active medical SOS for collapsed elderly casualty, supporting smoke and access reports, on-duty responders. Which responder fits AED support and what facts should I verify before broadcast?',
-        'Aisha|Wei Jian|AED|medical|responder|SOS',
-        'pondok-result',
-        'Pondok has compared the live roster with the case and highlighted skill-fit candidates for medical and A E D support. Nadia still decides every deployment.',
-        async () => {},
-      );
-      setChapter('Ops · coordination and dispatch');
-
-      setChapter('Ops · public warning');
-      await narrate(
-        'ops-broadcast',
-        'Nadia',
-        'The smoke report is verified, so I warn people away from the station exit without exposing the private case room.',
-      );
-      await click('ops', () => button('ops', 'Broadcast', true), 'broadcast action');
-      await click('ops', () => button('ops', 'Everyone', true), 'broadcast audience');
-      await click('ops', () => button('ops', 'Emergency', true), 'broadcast urgency');
-      await fill('ops', () => inputByPlaceholder('ops', 'Bishan'), 'Nicoll Highway MRT Exit B', 'broadcast area');
-      await fill('ops', () => inputByPlaceholder('ops', 'Flash flood'), 'Avoid MRT Exit B smoke incident', 'broadcast message');
-      await fill('ops', () => inputByPlaceholder('ops', 'What people should do'), 'Keep the covered walkway and access road clear for responders.', 'broadcast details');
-      await click('ops', () => button('ops', 'Send broadcast', true), 'send broadcast');
-      await flashPresentationCard(
-        'PUBLIC WARNING SENT',
-        'AVOID EXIT B',
-        'PRIVATE CASE STAYS PRIVATE',
-        'The public receives the hazard and access instruction. Medical details remain inside the S O S room.',
-      );
-
-      await switchCamera('responder', 'Resilience · useful while the link stutters');
-      await narrate(
-        'resilience-drop',
-        'Director',
-        "Now I break Aisha's M Q T T link. She marks on scene locally, but Mei Ling must not see a false arrival until the broker delivers it.",
-      );
-      frameWindow('responder').__kkDemo?.setTransportOnline(false);
-      setNetworkState('stuttering');
-      await wait(fast ? 100 : 900);
-      await click('responder', () => button('responder', 'On scene', true), 'offline on-scene update');
-      await narrate(
-        'responder-offline',
-        'Aisha',
-        'I mark myself on scene while the connection is down. My phone keeps the retained update queued instead of lying to Mei Ling.',
-      );
-
-      await switchCamera('resident', 'Citizen · no false acknowledgement');
-      frameWindow('responder').__kkDemo?.setTransportOnline(true);
-      setNetworkState('online');
-      await waitFor(
-        () => cleanText(frameDocument('resident').body.textContent).includes('someone is on scene') ? document.body : null,
-        'queued arrival to reconcile',
-        20000,
-      );
-      await narrate(
-        'reconciled',
-        'Director',
-        "The connection returns. M Q T T flushes the queued retained update, and Mei Ling's map reconciles to someone on scene.",
-      );
-
-      await switchCamera('resident', 'Citizen · trusted alert and closure');
-      actionBeat('Citizen · alerts', 'The ops warning has reached Mei Ling. The demo opens her alerts before closing the case.');
-      await click('resident', () => frameDocument('resident').querySelector('button[title="Alerts"]'), 'resident alerts');
-      await waitFor(() => cleanText(frameDocument('resident').body.textContent).includes('Avoid MRT Exit B smoke incident') ? document.body : null, 'resident broadcast');
-      await narrate(
-        'resident-safe',
-        'Mei Ling',
-        "The alert tells everyone else what to avoid. In my case room I can see responder presence, and I am now clear of the smoke. So I tap I'm safe.",
-      );
-      await closeSheet('resident', 'Alerts');
-      await click('resident', () => button('resident', "I'm safe", true), 'citizen safe acknowledgement');
-
-      await switchCamera('responder', 'Responder · dual acknowledgement');
-      await narrate(
-        'responder-resolve',
-        'Aisha',
-        "The citizen's safe button is not enough by itself, and my field confirmation is not enough alone. The case closes only when both facts exist.",
-      );
-      await click('responder', () => button('responder', 'Resolved', true), 'responder resolution');
-      await flashPresentationCard(
-        'DUAL ACKNOWLEDGEMENT',
-        'CITIZEN SAFE',
-        'RESPONDER RESOLVED',
-        'Only both acknowledgements close the live S O S.',
-      );
-
-      await switchCamera('all', 'Shared outcome');
-      await narrate(
-        'outcome',
-        'Director',
-        'Map evidence, case room, Host, M Q T T, and alerts served one story. This performance is complete — I will now remove everything this session created.',
-      );
-
-      await switchCamera('resident', 'Clean teardown · Director');
-      const before = await api<DemoStatus>(`/api/demo/${sessionId}/status`);
-      setStatus(before);
-      await cleanup();
+      let index = 0;
+      while (index < DEMO_SECTIONS.length) {
+        checkpoint();
+        const section = DEMO_SECTIONS[index];
+        sectionIndexRef.current = index;
+        setCurrentSectionIndex(index);
+        setChapter(section.chapter);
+        try {
+          await ensurePrerequisitesForSection(index);
+          await runSection(section.id);
+        } catch (caught) {
+          if (caught instanceof DemoSectionSkip) {
+            stabilizeDemoUiForSkip();
+            index = caught.targetIndex;
+            skipTargetRef.current = null;
+            await wait(fast ? 40 : 180);
+            continue;
+          }
+          throw caught;
+        }
+        if (skipTargetRef.current !== null) {
+          index = skipTargetRef.current;
+          skipTargetRef.current = null;
+          continue;
+        }
+        index += 1;
+      }
     } catch (caught) {
       const requestedStop = caught instanceof DemoStopped;
       const message = caught instanceof Error ? caught.message : String(caught);
@@ -1189,7 +1778,12 @@ export default function LiveDirector({ autostart, onExit }: { autostart: boolean
     if ((!autostart && !runAfterPrepareRef.current) || phase !== 'ready' || loaded.size !== 3 || autostartRunRef.current) return;
     autostartRunRef.current = true;
     runAfterPrepareRef.current = false;
-    void run();
+    void unlockDemoAudio()
+      .then(() => {
+        setVoiceReady(true);
+        return run();
+      })
+      .catch(() => { void run(); });
   }, [autostart, phase, loaded.size]);
 
   const frameUrl = (role: RoleKey) => {
@@ -1225,6 +1819,9 @@ export default function LiveDirector({ autostart, onExit }: { autostart: boolean
   const currentSpeaker = speakerProfile(speaker);
   const focusRole: RoleKey = camera === 'all' ? 'resident' : camera;
   const aiPanelOpen = aiKakiOpen(focusRole);
+  const activeSection = DEMO_SECTIONS[currentSectionIndex] ?? DEMO_SECTIONS[0];
+  const canSkipBack = phase === 'running' && currentSectionIndex > 0;
+  const canSkipForward = phase === 'running' && currentSectionIndex < DEMO_SECTIONS.length - 1;
 
   return (
     <main
@@ -1328,7 +1925,7 @@ export default function LiveDirector({ autostart, onExit }: { autostart: boolean
       >
         <div className="flex h-6 items-center gap-4 overflow-hidden border-b border-black/20 px-4 text-[8px] font-black uppercase tracking-[0.12em] text-black/60">
           <span className="shrink-0 text-red-700">Live demo</span>
-          <span className="truncate">{silent ? 'Silent caption review + deterministic live UI actions' : 'Qwen custom voices + deterministic live UI actions'}</span>
+          <span className="truncate">{silent ? 'Silent caption review — no voice playback' : 'Qwen3-TTS reference voices only — no browser TTS'}</span>
           <span className="shrink-0">{sessionId ?? 'session not started'}</span>
           <span className="shrink-0">{status?.retainedObjects ?? 0} session objects</span>
           <span className="ml-auto flex shrink-0 items-center gap-1.5">
@@ -1361,6 +1958,11 @@ export default function LiveDirector({ autostart, onExit }: { autostart: boolean
               <div className="truncate text-[16px] font-black uppercase leading-tight tracking-[-0.04em] text-black">{currentSpeaker.name}</div>
               <div className="truncate text-[8px] font-bold uppercase tracking-[0.12em] text-black/50">{currentSpeaker.role}</div>
               <div className="mt-0.5 truncate text-[8px] font-bold uppercase tracking-[0.12em] text-black/45">{chapter}</div>
+              {phase === 'running' && (
+                <div className="mt-0.5 truncate text-[8px] font-bold uppercase tracking-[0.12em] text-red-700/80">
+                  {currentSectionIndex + 1}/{DEMO_SECTIONS.length} · {SECTION_CATEGORY_LABELS[activeSection.category]} · {activeSection.title}
+                </div>
+              )}
               {seedReceipt && <div className="text-[8px] text-black/45">{seedReceipt.responders} agents · {seedReceipt.reports} reports</div>}
             </div>
           </div>
@@ -1373,7 +1975,50 @@ export default function LiveDirector({ autostart, onExit }: { autostart: boolean
             {error ? `Demo stopped: ${error}` : auditLine ?? caption}
           </p>
 
-          <div className="flex shrink-0 items-center gap-1">
+          <div className="flex shrink-0 flex-col items-end gap-1">
+            {phase === 'running' && (
+              <div className="flex items-center gap-1">
+                <select
+                  value={currentSectionIndex}
+                  onChange={(event) => requestSectionJump(Number(event.target.value))}
+                  className="h-7 max-w-[220px] border border-black/20 bg-white px-1 text-[8px] font-bold uppercase tracking-[0.08em] text-black"
+                  aria-label="Jump to demo section"
+                >
+                  {DEMO_SECTIONS.map((section, index) => (
+                    <option key={section.id} value={index}>
+                      {index + 1}. [{SECTION_CATEGORY_LABELS[section.category]}] {section.title}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={skipSectionBack}
+                  disabled={!canSkipBack}
+                  title="Skip back one section"
+                  className="flex h-7 w-7 items-center justify-center border border-black disabled:opacity-35"
+                >
+                  <ChevronLeft className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={skipSectionForward}
+                  disabled={!canSkipForward}
+                  title="Skip forward one section"
+                  className="flex h-7 w-7 items-center justify-center border border-black disabled:opacity-35"
+                >
+                  <ChevronRight className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={recoverFromStuck}
+                  title="Clear overlays and reset transport if stuck"
+                  className="flex h-7 items-center gap-1 border border-black px-2 text-[8px] font-black uppercase tracking-widest"
+                >
+                  <SkipForward className="h-3 w-3" /> Unstick
+                </button>
+              </div>
+            )}
+            <div className="flex items-center gap-1">
             {phase === 'idle' && (
               <button
                 onClick={() => {
@@ -1390,7 +2035,12 @@ export default function LiveDirector({ autostart, onExit }: { autostart: boolean
             )}
             {phase === 'ready' && (
               <button
-                onClick={() => { void unlockDemoAudio().then(() => run()); }}
+                onClick={() => {
+                  void unlockDemoAudio().then(() => {
+                    setVoiceReady(true);
+                    void run();
+                  });
+                }}
                 disabled={loaded.size !== 3}
                 className="flex h-9 items-center gap-1.5 bg-[#f1cf54] px-3 text-[9px] font-black uppercase tracking-widest disabled:opacity-40"
               >
@@ -1419,6 +2069,7 @@ export default function LiveDirector({ autostart, onExit }: { autostart: boolean
                 <Check className="h-3.5 w-3.5" /> Return to app
               </button>
             )}
+            </div>
           </div>
         </div>
       </footer>

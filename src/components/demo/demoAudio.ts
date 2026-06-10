@@ -32,6 +32,26 @@ export async function unlockDemoAudio(): Promise<void> {
   source.start();
 }
 
+export async function probeQwenScene(sceneId: string, baseUrl = '/demo/voice'): Promise<boolean> {
+  try {
+    const response = await fetch(`${baseUrl}/${sceneId}.wav`, { cache: 'no-store' });
+    if (!response.ok) return false;
+    const bytes = await response.arrayBuffer();
+    const header = new Uint8Array(bytes, 0, Math.min(bytes.byteLength, 12));
+    const ascii = String.fromCharCode(...header);
+    return bytes.byteLength >= 44 && ascii.startsWith('RIFF') && ascii.slice(8, 12) === 'WAVE';
+  } catch {
+    return false;
+  }
+}
+
+export async function missingQwenScenes(sceneIds: string[], baseUrl = '/demo/voice'): Promise<string[]> {
+  const checks = await Promise.all(
+    sceneIds.map(async (id) => ({ id, ok: await probeQwenScene(id, baseUrl) })),
+  );
+  return checks.filter((entry) => !entry.ok).map((entry) => entry.id);
+}
+
 export async function playQwenScene(sceneId: string, baseUrl = '/demo/voice'): Promise<boolean> {
   stopQwenScene();
   try {
@@ -63,8 +83,7 @@ export async function playQwenScene(sceneId: string, baseUrl = '/demo/voice'): P
       source.start();
     });
   } catch {
-    // A stale, partial, or unsupported WAV must never abort the live demo.
-    // Returning false makes LiveDirector use browser speech synthesis instead.
+    // Missing or corrupt WAV — caller must not fall back to browser TTS.
     stopQwenScene();
     return false;
   }

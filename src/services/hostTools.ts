@@ -1,4 +1,5 @@
 import type { LngLat } from '../state/types';
+import type { HostMapFocusRequest, HostMapPin } from '../state/hostMapFocus';
 
 export interface HostToolChip {
   label: string;
@@ -43,16 +44,59 @@ export async function queryHostTools(
   }
 }
 
-export function formatHostAedReply(result: HostQueryResult, origin?: LngLat | null): { text: string; chips: HostToolChip[] } {
+export function formatDistance(km: number): string {
+  if (!Number.isFinite(km)) return '—';
+  if (km < 1) return `${Math.max(1, Math.round(km * 1000))} m`;
+  if (km < 10) return `${km.toFixed(1)} km`;
+  return `${Math.round(km)} km`;
+}
+
+function pinsFromNearest(
+  kind: HostMapPin['kind'],
+  nearest: ToolPayload['nearest'],
+): HostMapPin[] {
+  return (nearest ?? []).slice(0, 3).map((n, i) => ({
+    kind,
+    label: n.name,
+    lng: n.lng,
+    lat: n.lat,
+    km: n.distanceKm,
+    best: i === 0,
+  }));
+}
+
+export function buildHostMapFocusFromAed(
+  result: HostQueryResult,
+  origin: LngLat,
+): HostMapFocusRequest | null {
+  const aed = result.tools?.nearestAed;
+  if (aed?.state !== 'live' || !aed.nearest?.length) return null;
+  const pins = pinsFromNearest('aed', aed.nearest);
+  if (!pins.length) return null;
+  return { layerId: 'aeds', origin: { lng: origin.lng, lat: origin.lat }, pins };
+}
+
+export function buildHostMapFocusFromHospital(
+  result: HostQueryResult,
+  origin: LngLat,
+): HostMapFocusRequest | null {
+  const hospital = result.tools?.nearestHospital;
+  if (hospital?.state !== 'live' || !hospital.nearest?.length) return null;
+  const pins = pinsFromNearest('hospital', hospital.nearest);
+  if (!pins.length) return null;
+  return { layerId: 'hospitals', origin: { lng: origin.lng, lat: origin.lat }, pins };
+}
+
+export function formatHostAedReply(result: HostQueryResult): { text: string; chips: HostToolChip[] } {
   const aed = result.tools?.nearestAed;
   if (aed?.state === 'live' && aed.nearest?.length) {
-    const header = origin
-      ? `Nearest AED from case (${origin.lat.toFixed(4)}, ${origin.lng.toFixed(4)}) — same pins as map layer:`
-      : 'Nearest AED (map layer):';
+    const nearest = aed.nearest[0];
+    const header = `Nearest AED · ${formatDistance(nearest.distanceKm)} from case — pinned on your map:`;
     const lines = aed.nearest.slice(0, 3).map((n, i) => {
-      const hours = n.hours ? ` · ${n.hours}` : '';
-      return `${i + 1}. ${n.name} · ${n.distanceKm} km · ${n.lat.toFixed(4)}, ${n.lng.toFixed(4)}${hours}`;
+      const tag = i === 0 ? ' ★ send someone here' : '';
+      return `${i + 1}. ${n.name} · ${formatDistance(n.distanceKm)}${tag}`;
     });
+    lines.push('AED layer is on. Tap a pin on the map for full details.');
     return {
       text: `${header}\n${lines.join('\n')}`,
       chips: [{ label: 'tool: map_aeds', ref: 'bundled' }],
@@ -67,16 +111,16 @@ export function formatHostAedReply(result: HostQueryResult, origin?: LngLat | nu
 export function formatHostHospitalReply(
   result: HostQueryResult,
   wantsLoad: boolean,
-  origin?: LngLat | null,
 ): { text: string; chips: HostToolChip[] } {
   const hospital = result.tools?.nearestHospital;
   if (hospital?.state === 'live' && hospital.nearest?.length) {
-    const header = origin
-      ? `Nearest A&E from case (${origin.lat.toFixed(4)}, ${origin.lng.toFixed(4)}) — same pins as map layer:`
-      : 'Nearest A&E (map layer):';
-    const lines = hospital.nearest.slice(0, 3).map((n, i) =>
-      `${i + 1}. ${n.name} · ${n.distanceKm} km · ${n.lat.toFixed(4)}, ${n.lng.toFixed(4)}`,
-    );
+    const nearest = hospital.nearest[0];
+    const header = `Nearest A&E · ${formatDistance(nearest.distanceKm)} from case — pinned on your map:`;
+    const lines = hospital.nearest.slice(0, 3).map((n, i) => {
+      const tag = i === 0 ? ' ★ primary escalation' : '';
+      return `${i + 1}. ${n.name} · ${formatDistance(n.distanceKm)}${tag}`;
+    });
+    lines.push('Hospital layer is on. Tap a pin on the map for the exact location.');
     if (wantsLoad) lines.push('A&E load: unavailable (no live MOH load feed).');
     return {
       text: `${header}\n${lines.join('\n')}`,
